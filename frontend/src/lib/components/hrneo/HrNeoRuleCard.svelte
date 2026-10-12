@@ -12,7 +12,6 @@
 		onedit: () => void;
 		ondelete: () => void;
 		onicon?: () => void;
-		toggleLoading?: boolean;
 	}
 
 	let {
@@ -22,8 +21,9 @@
 		onedit,
 		ondelete,
 		onicon,
-		toggleLoading = false,
 	}: Props = $props();
+
+	let displayName = $derived(rule.name || m.hrneo_group_unnamed());
 
 	let counts = $derived.by(() => {
 		const domains = rule.domains ?? [];
@@ -38,7 +38,7 @@
 
 <div class="hr-card" class:enabled={rule.enabled} class:broken>
 	<div class="card-main">
-		{#if onicon}
+		{#if onicon && rule.name}
 			<button
 				class="icon-btn"
 				type="button"
@@ -46,10 +46,10 @@
 				aria-label={m.routing_ip_card_change_icon()}
 				title={m.routing_ip_card_change_icon()}
 			>
-				<ServiceIcon name={rule.name} iconUrl={rule.iconUrl} size={36} />
+				<ServiceIcon name={displayName} iconUrl={rule.iconUrl} size={36} />
 			</button>
 		{:else}
-			<ServiceIcon name={rule.name} iconUrl={rule.iconUrl} size={36} />
+			<ServiceIcon name={displayName} iconUrl={rule.iconUrl} size={36} />
 		{/if}
 		<div class="card-info">
 			<div class="card-title">
@@ -59,7 +59,7 @@
 					class:led-gray={!rule.enabled && !broken}
 					class:led-red={broken}
 				></span>
-				<h3 lang="ru" title={rule.name}>{rule.name}</h3>
+				<h3 lang="ru" title={displayName} class:unnamed={!rule.name}>{displayName}</h3>
 				{#if broken}<span class="broken-badge">broken</span>{/if}
 			</div>
 			{#if counts.d > 0}<span class="card-stat">{m.routing_search_domains({ count: counts.d })}</span>{/if}
@@ -73,7 +73,6 @@
 			<Toggle
 				checked={rule.enabled}
 				onchange={(checked) => ontoggle(checked)}
-				loading={toggleLoading}
 				disabled={broken}
 				size="sm"
 			/>
@@ -146,6 +145,11 @@
 		overflow-wrap: normal;
 		word-break: normal;
 		hyphens: auto;
+	}
+
+	h3.unnamed {
+		color: var(--text-muted);
+		font-style: italic;
 	}
 
 	.led {
