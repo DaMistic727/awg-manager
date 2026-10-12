@@ -56,11 +56,6 @@ func TestEnsureFakeIPOverlay_StackNoGSOOrEIN(t *testing.T) {
 			if hasStack := strings.Contains(string(raw), `"stack"`); hasStack != (tc.wantStk != "") {
 				t.Errorf("ключ stack в JSON = %v при stack=%q: %s", hasStack, tc.wantStk, raw)
 			}
-			// F634: fakeip-DNS клиентов идёт на адрес tun и ловится только
-			// hijack; sing-box ≥1.15.0-alpha.12 без auto_route его не включает.
-			if !strings.Contains(string(raw), `"dns_mode":"hijack"`) {
-				t.Errorf("dns_mode must be hijack, got: %s", raw)
-			}
 			if strings.Contains(string(raw), `"gso"`) {
 				t.Errorf("marshaled tun inbound must not carry gso, got: %s", raw)
 			}
@@ -68,6 +63,24 @@ func TestEnsureFakeIPOverlay_StackNoGSOOrEIN(t *testing.T) {
 				t.Errorf("marshaled tun inbound must not carry endpoint_independent_nat, got: %s", raw)
 			}
 		})
+	}
+}
+
+// F634: fakeip-DNS клиентов идёт на адрес tun и ловится только hijack;
+// sing-box ≥1.15.0-alpha.12 без auto_route его не включает.
+func TestEnsureFakeIPOverlay_DNSModeHijack(t *testing.T) {
+	cfg := NewEmptyConfig()
+	ensureFakeIPOverlay(cfg, FakeIPTunSpec{
+		Iface: "opkgtun10", TunAddr4: "172.18.0.1/30", MTU: 1500,
+		Inet4Range: "10.128.0.0/10", CachePath: "/c.db", RealServer: "1.1.1.1",
+	})
+	in := findInbound(cfg, "tun-in")
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"dns_mode":"hijack"`) {
+		t.Errorf("dns_mode must be hijack, got: %s", raw)
 	}
 }
 
