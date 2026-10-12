@@ -7,7 +7,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
 )
 
-// #1037 (F636): mDNS (UDP/5353) не должен доходить до hijack-dns — иначе
+// #1037 (F636): мультикаст (в т.ч. mDNS) не должен доходить до hijack-dns — иначе
 // сервер type local шлёт мультикаст в t2s*, тот возвращается через SOCKS и
 // снова перехватывается. Правило живёт только в конфиге на диске.
 func TestMaterializeConfig_MDNSDropFirstAndRestoredAway(t *testing.T) {
@@ -32,8 +32,8 @@ func TestMaterializeConfig_MDNSDropFirstAndRestoredAway(t *testing.T) {
 			t.Fatalf("%s: %d правил, ждали 3: %+v", name, len(out.Route.Rules), out.Route.Rules)
 		}
 		got, _ := json.Marshal(out.Route.Rules[0])
-		if string(got) != `{"port":[5353],"action":"reject"}` {
-			t.Errorf("%s: rules[0] = %s, ждали отбой mDNS перед hijack-dns", name, got)
+		if string(got) != `{"ip_cidr":["224.0.0.0/4","ff00::/8"],"action":"reject"}` {
+			t.Errorf("%s: rules[0] = %s, ждали отбой мультикаста перед hijack-dns", name, got)
 		}
 		if out.Route.Rules[1].Action != "hijack-dns" {
 			t.Errorf("%s: rules[1] = %+v, ждали hijack-dns", name, out.Route.Rules[1])

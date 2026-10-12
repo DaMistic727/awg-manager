@@ -170,23 +170,27 @@ func (m ruleSetMaterializer) materializeConfig(slot orchestrator.Slot, cfg *Rout
 	}
 	applyHTTPClients(&out)
 	applyDNSRuleSetMatchSource(&out)
-	out.Route.Rules = append([]Rule{mdnsDropRule}, withoutMDNSDrop(out.Route.Rules)...)
+	out.Route.Rules = append([]Rule{mdnsDropRule()}, withoutMDNSDrop(out.Route.Rules)...)
 	return &out, nil
 }
 
-// mdnsDropRule отбивает mDNS (UDP/5353) до hijack-dns (#1037, F636). Сниффер
+// mdnsDropRule отбивает мультикаст до hijack-dns (#1037, F636). Сниффер
 // sing-box опознаёт mDNS-запрос как DNS на любом порту; `local.` уходит на
 // сервер type local, тот шлёт мультикаст во все multicast-интерфейсы, включая
 // t2s*, а оттуда пакет через SOCKS возвращается в sing-box — петля без
-// ограничителя. mDNS не маршрутизируется, через прокси ему делать нечего.
+// ограничителя. Матч по адресу, не по порту: unicast на :5353 не задевается,
+// а мультикасту через прокси делать нечего.
 // Правило живёт только в конфиге на диске: restoreConfig его снимает, так что
-// UI и индексы правил его не видят.
-var mdnsDropRule = Rule{Port: []int{5353}, Action: "reject"}
+// UI и индексы правил его не видят. Функция, а не переменная: срез IPCIDR
+// у каждого вызова свой, правка на месте не испортит шаблон.
+func mdnsDropRule() Rule {
+	return Rule{IPCIDR: []string{"224.0.0.0/4", "ff00::/8"}, Action: "reject"}
+}
 
 func withoutMDNSDrop(rules []Rule) []Rule {
 	out := make([]Rule, 0, len(rules))
 	for _, r := range rules {
-		if !reflect.DeepEqual(r, mdnsDropRule) {
+		if !reflect.DeepEqual(r, mdnsDropRule()) {
 			out = append(out, r)
 		}
 	}
