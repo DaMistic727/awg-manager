@@ -333,7 +333,7 @@ func TestEnable_RefusesWhenTProxyTargetUnavailable(t *testing.T) {
 		PolicyName: "Policy0", WANAutoDetect: true,
 	})
 
-	err := svc.Enable(context.Background())
+	err := svc.enable(context.Background())
 	if err == nil {
 		t.Fatal("недоступная цель TPROXY обязана валить Enable")
 	}
@@ -410,7 +410,7 @@ func TestEnable_NoPolicy_Refused(t *testing.T) {
 		Policies: policies,
 		IPTables: newTestIPTables(fe),
 	})
-	err := svc.Enable(context.Background())
+	err := svc.enable(context.Background())
 	if !errors.Is(err, ErrPolicyNotConfigured) {
 		t.Errorf("want ErrPolicyNotConfigured, got %v", err)
 	}
@@ -425,7 +425,7 @@ func TestEnable_PolicyMissing_Refused(t *testing.T) {
 		Policies: policies,
 		IPTables: newTestIPTables(fe),
 	})
-	err := svc.Enable(context.Background())
+	err := svc.enable(context.Background())
 	if !errors.Is(err, ErrPolicyMissing) {
 		t.Errorf("want ErrPolicyMissing, got %v", err)
 	}
@@ -440,7 +440,7 @@ func TestEnable_PolicyMissing_MessageContainsPolicyName(t *testing.T) {
 		Policies: policies,
 		IPTables: newTestIPTables(fe),
 	})
-	err := svc.Enable(context.Background())
+	err := svc.enable(context.Background())
 	if !errors.Is(err, ErrPolicyMissing) {
 		t.Fatalf("expected ErrPolicyMissing, got %v", err)
 	}
@@ -471,7 +471,7 @@ func TestEnable_AllDevicesMode_DoesNotRequirePolicyMark(t *testing.T) {
 		WANIPCollector:     &fakeWANIPCollector{},
 		NetfilterPreflight: func(context.Context) error { return nil },
 	})
-	if err := svc.Enable(context.Background()); err != nil {
+	if err := svc.enable(context.Background()); err != nil {
 		t.Fatalf("Enable all-devices mode: %v", err)
 	}
 	if policies.markCalls != 0 {
