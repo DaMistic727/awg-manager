@@ -272,6 +272,25 @@ func TestRouterPutSettings_QoSClassesInvalid_Returns400(t *testing.T) {
 	}
 }
 
+// IPv6-подсети в исключениях при неработающем перехвате IPv6 — 400 со своим
+// кодом и текстом, называющим подсеть: интерфейс показывает его как есть.
+func TestRouterPutSettings_IPv6BypassInactive_Returns400(t *testing.T) {
+	svc := &mockRouterSvc{updateSettingsErr: fmt.Errorf("%w: 2001:db8::/48", router.ErrIPv6BypassInactive)}
+	h := newMockRouterHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/router/settings",
+		strings.NewReader(`{"wanAutoDetect":true,"bypassExtraSubnets":"2001:db8::/48"}`))
+	rr := httptest.NewRecorder()
+	h.PutSettings(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{"IPV6_BYPASS_INACTIVE", "2001:db8::/48"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Errorf("want %q in body: %s", want, rr.Body.String())
+		}
+	}
+}
+
 func TestRouterPutSettings_RoundTripsQoSClasses(t *testing.T) {
 	svc := &mockRouterSvc{}
 	h := newMockRouterHandler(svc)
@@ -1087,6 +1106,52 @@ func TestRouterPutSettings_ExplicitEmptyPool6Passes(t *testing.T) {
 	}
 	if svc.settings.FakeIPPool6 != "" {
 		t.Errorf("fakeipPool6 = %q, want \"\" (подстановки быть не должно)", svc.settings.FakeIPPool6)
+	}
+}
+
+// Тот же узор для interceptFamily: клиент, не знающий поля (старый фронтенд,
+// скрипт), не должен своим PUT молча выключать перехват IPv6.
+func TestRouterPutSettings_OmittedInterceptFamilyKeepsStored(t *testing.T) {
+	svc := &mockRouterSvc{settings: storage.SingboxRouterSettings{InterceptFamily: "both"}}
+	h := newMockRouterHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/router/settings",
+		strings.NewReader(`{"enabled":true,"wanAutoDetect":true,"policyName":"awgm-router"}`))
+	rr := httptest.NewRecorder()
+	h.PutSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	if svc.settings.InterceptFamily != "both" {
+		t.Errorf("interceptFamily = %q, want сохранённое \"both\" (absent ≠ empty)", svc.settings.InterceptFamily)
+	}
+}
+
+// Присланное значение доходит до сервиса, и подстановка одного поля не
+// затирает другое: fakeipPool6 прислан, interceptFamily — нет.
+func TestRouterPutSettings_InterceptFamilyAndPool6Independent(t *testing.T) {
+	svc := &mockRouterSvc{settings: storage.SingboxRouterSettings{InterceptFamily: "both", FakeIPPool6: "fc00::/18"}}
+	h := newMockRouterHandler(svc)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/router/settings",
+		strings.NewReader(`{"enabled":true,"wanAutoDetect":true,"fakeipPool6":""}`))
+	rr := httptest.NewRecorder()
+	h.PutSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	if svc.settings.InterceptFamily != "both" || svc.settings.FakeIPPool6 != "" {
+		t.Errorf("family=%q pool6=%q, want \"both\" и \"\"", svc.settings.InterceptFamily, svc.settings.FakeIPPool6)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/singbox/router/settings",
+		strings.NewReader(`{"enabled":true,"wanAutoDetect":true,"interceptFamily":"ipv6_only"}`))
+	rr = httptest.NewRecorder()
+	h.PutSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	if svc.settings.InterceptFamily != "ipv6_only" {
+		t.Errorf("interceptFamily = %q, want \"ipv6_only\"", svc.settings.InterceptFamily)
 	}
 }
 

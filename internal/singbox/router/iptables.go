@@ -97,6 +97,12 @@ func SetDataDir(dir string) {
 	netfilterNatRulesPath = filepath.Join(sub, "router-netfilter-nat.rules")
 	netfilterCtCleanPath = filepath.Join(sub, "awgm-ctclean.sh")
 	bypassSavePath = filepath.Join(sub, "bypass.ipset")
+	netfilter6RulesPath = filepath.Join(sub, "router-netfilter6.rules")
+	netfilter6MangleRulesPath = filepath.Join(sub, "router-netfilter6-mangle.rules")
+	netfilter6NatRulesPath = filepath.Join(sub, "router-netfilter6-nat.rules")
+	bypassSave6Path = filepath.Join(sub, "bypass6.ipset")
+	netfilter6BlackholePath = filepath.Join(sub, "router-blackhole6.rules")
+	netfilterCtClean6Path = filepath.Join(sub, "awgm-ctclean6.sh")
 }
 
 // DataDirPaths — текущие пути, производные от каталога данных. Существует для
@@ -104,12 +110,18 @@ func SetDataDir(dir string) {
 // забытый путь молча уводит запись в боевой каталог.
 func DataDirPaths() map[string]string {
 	return map[string]string{
-		"netfilterRulesPath":       netfilterRulesPath,
-		"netfilterBlackholePath":   netfilterBlackholePath,
-		"netfilterMangleRulesPath": netfilterMangleRulesPath,
-		"netfilterNatRulesPath":    netfilterNatRulesPath,
-		"netfilterCtCleanPath":     netfilterCtCleanPath,
-		"bypassSavePath":           bypassSavePath,
+		"netfilterRulesPath":        netfilterRulesPath,
+		"netfilterBlackholePath":    netfilterBlackholePath,
+		"netfilterMangleRulesPath":  netfilterMangleRulesPath,
+		"netfilterNatRulesPath":     netfilterNatRulesPath,
+		"netfilterCtCleanPath":      netfilterCtCleanPath,
+		"bypassSavePath":            bypassSavePath,
+		"netfilter6RulesPath":       netfilter6RulesPath,
+		"netfilter6MangleRulesPath": netfilter6MangleRulesPath,
+		"netfilter6NatRulesPath":    netfilter6NatRulesPath,
+		"bypassSave6Path":           bypassSave6Path,
+		"netfilter6BlackholePath":   netfilter6BlackholePath,
+		"netfilterCtClean6Path":     netfilterCtClean6Path,
 	}
 }
 
@@ -132,6 +144,12 @@ func RestoreDataDirPaths(p map[string]string) {
 	netfilterNatRulesPath = p["netfilterNatRulesPath"]
 	netfilterCtCleanPath = p["netfilterCtCleanPath"]
 	bypassSavePath = p["bypassSavePath"]
+	netfilter6RulesPath = p["netfilter6RulesPath"]
+	netfilter6MangleRulesPath = p["netfilter6MangleRulesPath"]
+	netfilter6NatRulesPath = p["netfilter6NatRulesPath"]
+	bypassSave6Path = p["bypassSave6Path"]
+	netfilter6BlackholePath = p["netfilter6BlackholePath"]
+	netfilterCtClean6Path = p["netfilterCtClean6Path"]
 }
 
 // Mutable in tests via t.Cleanup so they can redirect into a tmp dir.
@@ -462,6 +480,17 @@ type RestoreInputSpec struct {
 	// tun, а не мимо него).
 	DSCPOnly bool
 
+	// V4Off — режим InterceptFamily == "ipv6_only": IPv4 не перехватывается.
+	// Цепочки и их PREROUTING-джампы при этом ОСТАЮТСЯ, но пустыми — трафик
+	// проходит их насквозь и уходит по таблице политики NDMS. Пустые цепочки
+	// вместо отсутствующих потому, что вся сверка режима tproxy (Probe, хук
+	// netfilter.d, Reconcile) наблюдает именно их: по ним она отличает
+	// «включено» от «выключено», и учить её третьему состоянию ради одного
+	// значения настройки было бы дороже и опаснее, чем пара пустых цепочек.
+	// DNS-RESCUE сохраняется (он про устройства вне политики), fail-closed
+	// blackhole не ставится — ронять нечего.
+	V4Off bool
+
 	// QoSClasses lists the active DSCP QoS classes (issue #371). Each entry
 	// yields one `-m dscp --dscp N` dispatch rule per chain (mangle UDP
 	// TPROXY --on-port TProxyPort, nat TCP REDIRECT --to-ports RedirectPort)
@@ -661,6 +690,13 @@ func buildMangleRestoreInput(spec RestoreInputSpec) string {
 	b.WriteString("*mangle\n")
 	fmt.Fprintf(&b, ":%s - [0:0]\n", ChainName)
 
+	// ipv6_only: цепочка пустая, остаётся только джамп (см. V4Off).
+	if spec.V4Off {
+		emitPreroutingJump(&b, ChainName, spec)
+		b.WriteString("COMMIT\n")
+		return b.String()
+	}
+
 	// Пользовательский bypass — целиком мимо sing-box, ДО перехвата DNS.
 	emitUserBypassReturns(&b, ChainName, spec.BypassCIDRs)
 	emitBypassSetReturn(&b, ChainName, spec)
@@ -752,6 +788,15 @@ func buildNatRestoreInput(spec RestoreInputSpec) string {
 	b.WriteString("*nat\n")
 	fmt.Fprintf(&b, ":%s - [0:0]\n", RedirectChain)
 
+	// ipv6_only: пустая цепочка и джамп, плюс DNS-RESCUE — он про устройства
+	// ВНЕ политики и от перехвата самой политики не зависит (см. V4Off).
+	if spec.V4Off {
+		emitPreroutingJump(&b, RedirectChain, spec)
+		emitDNSRescue(&b, spec)
+		b.WriteString("COMMIT\n")
+		return b.String()
+	}
+
 	emitUserBypassReturns(&b, RedirectChain, spec.BypassCIDRs)
 	emitBypassSetReturn(&b, RedirectChain, spec)
 
@@ -829,17 +874,25 @@ func buildNatRestoreInput(spec RestoreInputSpec) string {
 	// All rules use -I PREROUTING 1 so they land in front of the NDMS
 	// jumps; their relative order amongst themselves doesn't matter
 	// (per-bridge, per-protocol independent matches).
-	if !spec.MatchAll {
-		for _, bm := range spec.LANBridges {
-			fmt.Fprintf(&b, "-I PREROUTING 1 -i %s -m mark --mark 0x0 -m pkttype --pkt-type unicast -p udp --dport 53 -m comment --comment %q -j REDIRECT --to-ports %d\n",
-				bm.Bridge, DNSRescueTag, bm.Port)
-			fmt.Fprintf(&b, "-I PREROUTING 1 -i %s -m mark --mark 0x0 -m pkttype --pkt-type unicast -p tcp --dport 53 -m comment --comment %q -j REDIRECT --to-ports %d\n",
-				bm.Bridge, DNSRescueTag, bm.Port)
-		}
-	}
+	emitDNSRescue(&b, spec)
 
 	b.WriteString("COMMIT\n")
 	return b.String()
+}
+
+// emitDNSRescue рендерит правила DNS-RESCUE (см. комментарий выше, в
+// buildNatRestoreInput). Вынесено, потому что нужно обеим ветвям — обычной и
+// V4Off.
+func emitDNSRescue(b *strings.Builder, spec RestoreInputSpec) {
+	if spec.MatchAll {
+		return
+	}
+	for _, bm := range spec.LANBridges {
+		fmt.Fprintf(b, "-I PREROUTING 1 -i %s -m mark --mark 0x0 -m pkttype --pkt-type unicast -p udp --dport 53 -m comment --comment %q -j REDIRECT --to-ports %d\n",
+			bm.Bridge, DNSRescueTag, bm.Port)
+		fmt.Fprintf(b, "-I PREROUTING 1 -i %s -m mark --mark 0x0 -m pkttype --pkt-type unicast -p tcp --dport 53 -m comment --comment %q -j REDIRECT --to-ports %d\n",
+			bm.Bridge, DNSRescueTag, bm.Port)
+	}
 }
 
 type restoreNoflushFn func(ctx context.Context, input string) error
@@ -865,6 +918,10 @@ type IPTables struct {
 	persistBlackhole        persistFn
 	cleanupBlackhole        func()
 	runCtClean              func(ctx context.Context)
+
+	// v6 — системная сторона v6-слоя (iptables6.go). Одним интерфейсом, а не
+	// россыпью полей: см. v6Backend.
+	v6 v6Backend
 }
 
 func NewIPTables() *IPTables {
@@ -900,6 +957,8 @@ func NewIPTables() *IPTables {
 			// must never fail Install (interception is already up).
 			_, _ = sysexec.Run(ctx, netfilterCtCleanPath)
 		},
+
+		v6: systemV6{},
 	}
 }
 
@@ -966,14 +1025,14 @@ func (it *IPTables) Install(ctx context.Context, spec RestoreInputSpec) error {
 		}
 	}
 	if it.persistHook != nil {
-		if err := it.persistHook(!spec.DSCPOnly); err != nil {
+		if err := it.persistHook(!spec.DSCPOnly && !spec.V4Off); err != nil {
 			return fmt.Errorf("write netfilter hook: %w", err)
 		}
 	}
 	// policy-tun: blackhole в этом режиме не применяется — снести файл правил,
 	// оставшийся от прежнего режима, иначе хук прежней установки продолжил бы
 	// поднимать fail-closed DROP на каждой перезагрузке netfilter.
-	if spec.DSCPOnly && it.cleanupBlackhole != nil {
+	if (spec.DSCPOnly || spec.V4Off) && it.cleanupBlackhole != nil {
 		it.cleanupBlackhole()
 	}
 	if err := it.restoreNoflush(ctx, input); err != nil {

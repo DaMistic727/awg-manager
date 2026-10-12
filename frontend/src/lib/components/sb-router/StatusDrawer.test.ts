@@ -154,3 +154,122 @@ describe('Анализ трафика: потолок UDP-NAT', () => {
 		expect(patchSpy).toHaveBeenCalledWith({ udpNatMax: undefined });
 	});
 });
+
+describe('Семейства адресов (перехват IPv6)', () => {
+	beforeEach(() => {
+		patchSpy.mockClear();
+		uiMode.set('expert');
+		openDrawer();
+	});
+
+	it('TPROXY: без поля в настройках выбрано «Только IPv4», смена уходит через applyPatch', async () => {
+		settings.set({ routingMode: 'tproxy', deviceMode: 'policy', policyName: 'p1' });
+		render(StatusDrawer);
+		const select = screen.getByLabelText<HTMLSelectElement>('Перехватывать');
+		expect(select.value).toBe('ipv4_only');
+		await fireEvent.change(select, { target: { value: 'both' } });
+		expect(patchSpy).toHaveBeenCalledWith({ interceptFamily: 'both' });
+	});
+
+	it('TPROXY: показывает сохранённое значение', () => {
+		settings.set({ routingMode: 'tproxy', deviceMode: 'policy', policyName: 'p1', interceptFamily: 'ipv6_only' });
+		render(StatusDrawer);
+		expect(screen.getByLabelText<HTMLSelectElement>('Перехватывать').value).toBe('ipv6_only');
+	});
+
+	it('policy-tun: выбора нет — семейства задаёт адресация tun', () => {
+		settings.set({ routingMode: 'policy-tun', deviceMode: 'policy', policyName: 'p1' });
+		render(StatusDrawer);
+		expect(screen.queryByLabelText('Перехватывать')).toBeNull();
+	});
+});
+
+describe('Семейства адресов: отказ бэкенда', () => {
+	beforeEach(() => {
+		patchSpy.mockClear();
+		uiMode.set('expert');
+		settings.set({ routingMode: 'tproxy', deviceMode: 'policy', policyName: 'p1' });
+		openDrawer();
+	});
+
+	it('без пакета ip6tables выбор возвращается к сохранённому', async () => {
+		patchSpy.mockRejectedValueOnce(new Error('для перехвата IPv6 нужен пакет ip6tables'));
+		render(StatusDrawer);
+		const select = screen.getByLabelText<HTMLSelectElement>('Перехватывать');
+		await fireEvent.change(select, { target: { value: 'both' } });
+		await waitFor(() => expect(select.value).toBe('ipv4_only'));
+	});
+});
+
+// Бэкенд отвергает IPv6-подсети в исключениях, пока перехват IPv6 выключен
+// (иначе запись сохранялась бы и молча ничего не делала). Поле ввода не шлёт
+// заведомо отвергаемое и объясняет причину сразу.
+describe('Исключения по подсетям: IPv6 только при перехвате IPv6', () => {
+	beforeEach(() => {
+		patchSpy.mockClear();
+		uiMode.set('expert');
+		openDrawer();
+	});
+
+	async function typeSubnet(value: string) {
+		const input = screen.getByLabelText<HTMLInputElement>('Доп. подсети');
+		await fireEvent.input(input, { target: { value } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+	}
+
+	it('«Только IPv4»: IPv6-подсеть не принимается, запрос не уходит', async () => {
+		settings.set({ routingMode: 'tproxy', deviceMode: 'policy', policyName: 'p1' });
+		render(StatusDrawer);
+		await typeSubnet('2001:db8::/48');
+		expect(patchSpy).not.toHaveBeenCalled();
+		expect(screen.queryByText(/IPv6-адреса действуют только при включённом перехвате IPv6/)).not.toBeNull();
+	});
+
+	it('«Только IPv4»: IPv4-подсеть принимается как раньше', async () => {
+		settings.set({ routingMode: 'tproxy', deviceMode: 'policy', policyName: 'p1' });
+		render(StatusDrawer);
+		await typeSubnet('10.0.0.0/8');
+		expect(patchSpy).toHaveBeenCalledWith({ bypassExtraSubnets: '10.0.0.0/8' });
+	});
+
+	it('«IPv4 и IPv6»: IPv6-подсеть принимается', async () => {
+		settings.set({ routingMode: 'tproxy', deviceMode: 'policy', policyName: 'p1', interceptFamily: 'both' });
+		render(StatusDrawer);
+		await typeSubnet('2001:db8::/48');
+		expect(patchSpy).toHaveBeenCalledWith({ bypassExtraSubnets: '2001:db8::/48' });
+	});
+
+	it('policy-tun: IPv6-подсеть не принимается даже при сохранённом «IPv4 и IPv6»', async () => {
+		settings.set({ routingMode: 'policy-tun', deviceMode: 'policy', policyName: 'p1', interceptFamily: 'both' });
+		render(StatusDrawer);
+		await typeSubnet('2001:db8::/48');
+		expect(patchSpy).not.toHaveBeenCalled();
+	});
+
+	// Дровер управляет только tproxy и policy-tun, и при сохранённом fakeip-tun
+	// его целевой режим — tproxy. Бэкенд судит по сохранённому режиму: v6-слоя
+	// в fakeip-tun нет, подсеть он отвергнет.
+	it('fakeip-tun: IPv6-подсеть не принимается даже при сохранённом «IPv4 и IPv6»', async () => {
+		settings.set({ routingMode: 'fakeip-tun', deviceMode: 'policy', policyName: 'p1', interceptFamily: 'both' });
+		render(StatusDrawer);
+		await typeSubnet('2001:db8::/48');
+		expect(patchSpy).not.toHaveBeenCalled();
+		// Отказ, а не потерянный ввод: поле объясняет причину.
+		expect(screen.queryByText(/IPv6-адреса действуют только при включённом перехвате IPv6/)).not.toBeNull();
+	});
+
+	it('оставшаяся IPv6-подсеть при выключенном перехвате видна и помечена недействующей', () => {
+		settings.set({
+			routingMode: 'tproxy',
+			deviceMode: 'policy',
+			policyName: 'p1',
+			bypassExtraSubnets: '10.0.0.0/8, 2001:db8::/48',
+		});
+		render(StatusDrawer);
+		const inert = screen.getByText('2001:db8::/48', { exact: false }).closest('.port-chip');
+		expect(inert?.classList.contains('inert')).toBe(true);
+		expect(inert?.getAttribute('title')).toBe('Не действует: перехват IPv6 выключен');
+		const live = screen.getByText('10.0.0.0/8', { exact: false }).closest('.port-chip');
+		expect(live?.classList.contains('inert')).toBe(false);
+	});
+});

@@ -49,6 +49,34 @@ func (s *ServiceImpl) UpdateSettings(ctx context.Context, sr storage.SingboxRout
 	if err := s.validateBypassGeoIPTags(normalized); err != nil {
 		return err
 	}
+	// Перехват IPv6 требует ip6tables — в Entware это отдельный пакет. Отказ
+	// здесь, а не молчаливое «включено, но не работает» в журнале. Только на
+	// переходе к IPv6: если он уже включён, а пакет потом удалили, прочие
+	// правки настроек должны оставаться проходимыми.
+	if familyHasV6(normalized.InterceptFamily) {
+		cur, err := s.deps.Settings.Get()
+		if err != nil {
+			return err
+		}
+		if !familyHasV6(cur.SingboxRouter.InterceptFamily) && !ip6tablesAvailable() {
+			return ErrIP6TablesMissing
+		}
+	}
+	// IPv6-подсети в исключениях принимаются, только пока v6-слой работает:
+	// иначе запись сохранилась бы и молча ничего не делала. Проверка здесь, а
+	// не в чистом Normalize: тот зовётся и на чтении, а режим этим PUT не
+	// меняется — судить надо по сохранённому.
+	if len(normalized.BypassExtraSubnets) > 0 {
+		cur, err := s.deps.Settings.Get()
+		if err != nil {
+			return err
+		}
+		next := normalized
+		next.RoutingMode = cur.SingboxRouter.RoutingMode
+		if err := checkV6SubnetsAccepted(next, cur.SingboxRouter); err != nil {
+			return err
+		}
+	}
 	// Персист-окно под transitionMu: см. ErrTransitionInProgress. Reconcile
 	// ниже остаётся ВНЕ окна — он сам берёт transitionMu через TryLock и под
 	// нашим локом молча съел бы тик (мьютекс нерекурсивный).
@@ -213,6 +241,15 @@ func NormalizeSingboxRouterSettings(sr storage.SingboxRouterSettings) (storage.S
 	case "policy", "all":
 	default:
 		return sr, fmt.Errorf("deviceMode must be %q or %q, got %q", "policy", "all", sr.DeviceMode)
+	}
+	if sr.InterceptFamily == "" {
+		sr.InterceptFamily = FamilyIPv4Only
+	}
+	switch sr.InterceptFamily {
+	case FamilyIPv4Only, FamilyBoth, FamilyIPv6Only:
+	default:
+		return sr, fmt.Errorf("interceptFamily must be %q, %q or %q, got %q",
+			FamilyIPv4Only, FamilyBoth, FamilyIPv6Only, sr.InterceptFamily)
 	}
 	if sr.RoutingMode == "" {
 		sr.RoutingMode = "tproxy"

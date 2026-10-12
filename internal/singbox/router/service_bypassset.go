@@ -157,17 +157,39 @@ func (s *ServiceImpl) TriggerBypassSetPopulate() {
 func (s *ServiceImpl) runBypassPopulate(tags []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), bypassPopulateTimeout)
 	defer cancel()
-	res, err := s.populateBypassSetOnce(ctx, tags)
+	// IPv6-набор наполняется тем же проходом, но только при включённом
+	// перехвате IPv6 (см. ensureBypassSet6).
+	v6, v6Err := s.bypassSet6Wanted()
+	if v6Err != nil {
+		s.appLog.Warn("ipv6", "", "geoip-обход IPv6: настройки не прочитаны, набор не наполняется: "+v6Err.Error())
+	}
+	res, err := s.populateBypassSetOnce(ctx, tags, v6)
 	if _, wanted, wErr := s.bypassSetWanted(); wErr == nil && !wanted {
 		// ctx мог истечь вместе с наполнением — снос идёт по своему.
 		s.teardownBypassSet(context.Background())
 		return
 	}
+	// То же для IPv6-набора: пока шло наполнение, перехват IPv6 могли
+	// выключить — слой уже снял правила и снёс набор, а наш swap его воскресил.
+	// Настройки не прочитались — набор не трогаем, как v4 выше.
+	if v6 {
+		still, wErr := s.bypassSet6Wanted()
+		switch {
+		case wErr != nil:
+			s.appLog.Warn("ipv6", "", "geoip-обход IPv6: настройки не перечитаны, набор оставлен: "+wErr.Error())
+		case !still:
+			if derr := dropBypassSet6(context.Background()); derr != nil {
+				s.appLog.Warn("ipv6", "", "geoip-обход IPv6: снос набора: "+derr.Error())
+			}
+			// Набора быть не должно — и его итог устарел вместе с ним.
+			res.EntryCount6, res.Count6OK, res.Err6 = 0, false, nil
+		}
+	}
 	s.storeBypassSetOutcome(res, err)
 }
 
 // populateBypassSetOnce — продакшн-наполнение (или тест-шов, если задан).
-func (s *ServiceImpl) populateBypassSetOnce(ctx context.Context, tags []string) (bypassset.PopulateResult, error) {
+func (s *ServiceImpl) populateBypassSetOnce(ctx context.Context, tags []string, v6 bool) (bypassset.PopulateResult, error) {
 	if s.populateBypassSet != nil {
 		return s.populateBypassSet(ctx, tags)
 	}
@@ -177,6 +199,8 @@ func (s *ServiceImpl) populateBypassSetOnce(ctx context.Context, tags []string) 
 	return bypassset.Populate(ctx, geoSourceAdapter{files: s.deps.GeoTagCounts}, bypassset.PopulateInput{
 		GeoIPTags: tags,
 		SavePath:  bypassSavePath,
+		V6:        v6,
+		SavePath6: bypassSave6Path,
 	})
 }
 
@@ -191,6 +215,10 @@ func (s *ServiceImpl) storeBypassSetOutcome(res bypassset.PopulateResult, err er
 	s.bypassEntryCount, s.bypassCountOK = res.EntryCount, res.CountOK
 	if !res.CountOK {
 		s.bypassEntryCount = 0
+	} else if res.Count6OK {
+		// Размер в статусе — сумма по обоим наборам; IPv6-половина входит в
+		// неё, только когда её счётчик — факт.
+		s.bypassEntryCount += res.EntryCount6
 	}
 	if err != nil {
 		s.bypassLastError = err.Error()
@@ -198,6 +226,17 @@ func (s *ServiceImpl) storeBypassSetOutcome(res bypassset.PopulateResult, err er
 		s.bypassLastError = ""
 	}
 	s.mu.Unlock()
+
+	// Отказ IPv6-половины в bypassLastError не попадает: IPv4-набор при нём
+	// собран и действует, и статус набора не должен показывать сбой. Причина
+	// уходит отдельным предупреждением — в журнал и в статус роутера.
+	if res.Err6 != nil {
+		msg := res.Err6.Error()
+		s.bypass6Problem.Store(&msg)
+		s.bypassLog.Warn("bypass-set", "", "geoip-обход IPv6: набор не собран (IPv4-набор собран и действует): "+msg)
+	} else {
+		s.bypass6Problem.Store(nil)
+	}
 
 	switch {
 	case err != nil:

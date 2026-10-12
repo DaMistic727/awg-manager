@@ -562,6 +562,45 @@ type ServiceImpl struct {
 	// TestReconcileInstalled_BlackholeFollowsWANIPChange.
 	appliedBlackhole *RestoreInputSpec
 
+	// appliedV6 — снимок ТРЕТЬЕГО ресурса: правил перехвата IPv6
+	// (iptables6.go). nil = v6-слой этим процессом не ставился; факт «стоит в
+	// ядре» после рестарта демона несёт файл правил (v6RulesFilePresent).
+	// Писатели и сериализация те же, что у appliedSpec: syncV6/teardownV6 под
+	// transitionMu.
+	appliedV6 *V6Spec
+	// appliedBlackhole6 — снимок fail-closed блокировки IPv6, зеркало
+	// appliedBlackhole: nil = блокировки нет. Сравнение — equalBlackholeSpec6.
+	appliedBlackhole6 *V6Spec
+	// v6LastWarn — последнее предупреждение v6-слоя, чтобы не повторять его
+	// каждым тиком reconcile (см. v6Warn).
+	v6LastWarn string
+	// v6Problem — то же предупреждение для GetStatus: почему перехват IPv6
+	// включён в настройках, но не работает. Atomic, потому что пишет его
+	// reconcile-тик, а читает HTTP-обработчик статуса; nil — проблем нет.
+	v6Problem atomic.Pointer[string]
+	// v6SkippedLogged — список пропущенных мостов, о котором уже написано в
+	// журнал. Отдельно от v6LastWarn: пропуск моста не мешает слою встать, и
+	// общий сброс предупреждения после успешной установки заставлял бы писать
+	// о нём каждым тиком.
+	v6SkippedLogged string
+	// v6SpecErrLogged — так же дедуплицированная ошибка разбора исключений
+	// (порты, подсети) при сборке спека v6.
+	v6SpecErrLogged string
+	// v6KernelUnknown — установка правил или блокировки IPv6 оборвалась
+	// ошибкой: что из них осталось в ядре, неизвестно, а файлов правил на
+	// диске при этом может не быть (они пишутся после успешного restore).
+	// Без этого признака снос слоя (teardownV6) счёл бы, что сносить нечего.
+	v6KernelUnknown bool
+	// v6StartSwept — безусловный снос v6-слоя на первой сверке уже был
+	// (syncV6). Один раз за жизнь процесса.
+	v6StartSwept bool
+	// v6PortsReserved — порты v6-слоя уже убраны из эфемерного пула ядра
+	// (один раз за жизнь процесса, при первом включении перехвата IPv6).
+	v6PortsReserved bool
+	// v6OffSettled — при выключенном слое конфиг уже проверен и наших
+	// инбаундов в нём нет (см. healV6Inbounds).
+	v6OffSettled bool
+
 	// last-installed geoip-теги обхода; в спеке от них остаётся только
 	// производный BypassGeoIPSet, то есть состав тегов из снимка
 	// невосстановим. Поэтому смена состава видна ТОЛЬКО здесь — и это триггер
@@ -583,6 +622,11 @@ type ServiceImpl struct {
 	bypassLastPopulate time.Time
 	bypassLastError    string
 	bypassMissingTags  []string
+	// bypass6Problem — отказ IPv6-половины последнего наполнения (набор
+	// AWGM-BYPASS6). Отдельно от bypassLastError: IPv4-набор при этом собран,
+	// и статус набора сбоем не становится — причина идёт в статус роутера
+	// предупреждением (bypass6Issue).
+	bypass6Problem atomic.Pointer[string]
 	// populateBypassSet — шов наполнения для тестов (nil = bypassset.Populate).
 	populateBypassSet func(ctx context.Context, tags []string) (bypassset.PopulateResult, error)
 	// teardownBypassSetFn — шов сноса набора для тестов (nil = реальный снос).
@@ -654,6 +698,8 @@ type ServiceImpl struct {
 	keenDNSAddrs       []string
 	keenDNSInfoAt      time.Time
 	keenDNSBypassCIDRs []string
+	// keenDNSBypassCIDRs6 — IPv6-часть того же обхода, для правил v6-слоя.
+	keenDNSBypassCIDRs6 []string
 }
 
 func NewService(d Deps) *ServiceImpl {

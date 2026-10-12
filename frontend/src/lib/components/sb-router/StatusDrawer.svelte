@@ -76,6 +76,14 @@
     activeMode ?? pickedMode ?? ($settings?.routingMode === 'policy-tun' ? 'policy-tun' : 'tproxy'),
   );
   let policyTunMode = $derived(targetMode === 'policy-tun');
+  // Перехват IPv6 есть только в TPROXY и только при семействе с IPv6. От него
+  // зависит, принимаются ли IPv6-подсети в исключениях (бэкенд без него их
+  // отвергает). Режим — сохранённый, как у бэкенда (v6LayerActive), а не
+  // targetMode: тот при fakeip-tun или выборе в сессии говорит tproxy.
+  let v6Intercept = $derived(
+    (!cfg?.routingMode || cfg.routingMode === 'tproxy') &&
+      (cfg?.interceptFamily === 'both' || cfg?.interceptFamily === 'ipv6_only'),
+  );
   // KeeneticOS 4.x не знает интерфейсов OpkgTun — policy-tun там не поднять.
   let tunSupported = $derived(opkgTunSupported($systemInfo.data));
 
@@ -224,6 +232,16 @@
     const { override, patch } = planToggleAutoDetect(checked);
     wanAutoOverride = override;
     if (patch) void applyPatch(patch);
+  }
+  async function onInterceptFamilyChange(e: Event) {
+    const el = e.currentTarget as HTMLSelectElement;
+    const v = el.value;
+    if (v !== 'ipv4_only' && v !== 'both' && v !== 'ipv6_only') return;
+    await applyPatch({ interceptFamily: v });
+    // Бэкенд отвергает IPv6 без пакета ip6tables, а выключение IPv6 — пока в
+    // исключениях остаются IPv6-подсети: возвращаем сохранённое значение,
+    // иначе список показывал бы режим, который не применился.
+    if (lastError) el.value = cfg?.interceptFamily ?? 'ipv4_only';
   }
   function onCacheLocationChange(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
@@ -426,6 +444,26 @@
           variant="expert"
           onPatch={(patch) => void applyPatch(patch)}
         />
+
+        <!-- Семейства адресов — тоже только TPROXY: в tun-режимах их задаёт
+             адресация tun-интерфейса. -->
+        <section class="sec">
+          <div class="sec-cap">{m.sb_router_status_sec_family()}</div>
+          <div class="field">
+            <label class="lbl" for="ed-family">{m.sb_router_status_family_label()}</label>
+            <select
+              id="ed-family"
+              class="inp"
+              value={cfg.interceptFamily ?? 'ipv4_only'}
+              onchange={onInterceptFamilyChange}
+            >
+              <option value="ipv4_only">{m.sb_router_status_family_ipv4_only()}</option>
+              <option value="both">{m.sb_router_status_family_both()}</option>
+              <option value="ipv6_only">{m.sb_router_status_family_ipv6_only()}</option>
+            </select>
+          </div>
+          <p class="hint">{m.sb_router_status_family_hint()}</p>
+        </section>
       {/if}
 
       <!-- WAN-интерфейс -->
@@ -532,7 +570,7 @@
         {/if}
         <div class="field">
           <label class="lbl" for="ed-subnets-input">{m.sb_router_status_extra_subnets()}</label>
-          <SubnetChipsInput inputId="ed-subnets-input" value={cfg.bypassExtraSubnets ?? ''} onChange={(v) => void applyPatch({ bypassExtraSubnets: v })} />
+          <SubnetChipsInput inputId="ed-subnets-input" value={cfg.bypassExtraSubnets ?? ''} allowIPv6={v6Intercept} onChange={(v) => void applyPatch({ bypassExtraSubnets: v })} />
         </div>
         <p class="hint">{m.sb_router_status_subnets_hint()}</p>
         <!-- Набор AWGM-BYPASS живёт только в TPROXY-перехвате: в policy-tun

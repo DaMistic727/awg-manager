@@ -19,6 +19,12 @@ type GeoSource interface {
 type PopulateInput struct {
 	GeoIPTags []string
 	SavePath  string // "" — save-файл не писать (тесты)
+	// V6 — наполнять и IPv6-близнеца (AWGM-BYPASS6) IPv6-записями тех же
+	// тегов. false — IPv6-записи .dat пропускаются, как и раньше; сам набор
+	// при этом не трогается: его сносит v6-слой роутера.
+	V6 bool
+	// SavePath6 — дамп AWGM-BYPASS6 для v6-хука. "" — не писать.
+	SavePath6 string
 }
 
 // PopulateResult — итог наполнения: размер живого набора (CountOK=false —
@@ -27,6 +33,15 @@ type PopulateResult struct {
 	EntryCount  int
 	CountOK     bool
 	MissingTags []string
+
+	// Итог IPv6-половины (AWGM-BYPASS6); заполняется только при V6. Отдельно
+	// от полей выше намеренно: половины независимы — у каждой свой черновик и
+	// свой swap, — и отказ одной не должен выглядеть как сбой всего набора.
+	EntryCount6 int
+	Count6OK    bool
+	// Err6 — отказ IPv6-половины. Ошибкой Populate он НЕ становится:
+	// IPv4-набор при этом собран, сохранён и действует.
+	Err6 error
 }
 
 // Populate статично наполняет AWGM-BYPASS: geoip-теги → staging → атомарный
@@ -52,6 +67,11 @@ func Populate(ctx context.Context, geo GeoSource, in PopulateInput) (PopulateRes
 		chunk = chunk[:0]
 		return err
 	}
+	// IPv6-записи идут в свой черновик теми же чанками, что и IPv4: копить
+	// семейство целиком — это вся IPv6-часть выбранных тегов в куче разом, а
+	// наполнение идёт на роутерах с 128–256 МБ памяти. После первого отказа
+	// половина выключается до конца прохода (v6.err), IPv4 идёт дальше.
+	v6 := newStaging6(ctx, in.V6)
 	for _, tag := range in.GeoIPTags {
 		lines, notFound, err := geo.GeoIPTagLines(tag)
 		if notFound {
@@ -69,7 +89,9 @@ func Populate(ctx context.Context, geo GeoSource, in PopulateInput) (PopulateRes
 						return res, fmt.Errorf("populate staging: %w", err)
 					}
 				}
+				continue
 			}
+			v6.add(ctx, l)
 		}
 	}
 	if err := flush(); err != nil {
@@ -87,17 +109,24 @@ func Populate(ctx context.Context, geo GeoSource, in PopulateInput) (PopulateRes
 			return res, fmt.Errorf("ipset save: %w", err)
 		}
 	}
+	if in.V6 {
+		res.EntryCount6, res.Count6OK, res.Err6 = v6.commit(ctx, in.SavePath6)
+	}
 	return res, nil
 }
 
 // writeSaveFile кладёт дамп живого набора в path — источник восстановления
 // набора после перезагрузки роутера.
 func writeSaveFile(ctx context.Context, path string) error {
+	return writeSaveFileOf(ctx, SetName, path)
+}
+
+func writeSaveFileOf(ctx context.Context, name, path string) error {
 	bin, err := ipsetBin()
 	if err != nil {
 		return err
 	}
-	r, err := runIpsetCtl(ctx, bin, "save", SetName)
+	r, err := runIpsetCtl(ctx, bin, "save", name)
 	if err != nil {
 		return sysexec.FormatError(r, err)
 	}
