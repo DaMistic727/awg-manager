@@ -245,8 +245,9 @@ func TestInlineRuleSetMaterializer_RewritesRuleRefsOnMaterialize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Route.Rules) != 1 || len(out.Route.Rules[0].RuleSet) != 1 || out.Route.Rules[0].RuleSet[0] != "foo-srs" {
-		t.Fatalf("route rule_set refs = %+v", out.Route.Rules[0].RuleSet)
+	rules := withoutMDNSDrop(out.Route.Rules)
+	if len(rules) != 1 || len(rules[0].RuleSet) != 1 || rules[0].RuleSet[0] != "foo-srs" {
+		t.Fatalf("route rule_set refs = %+v", rules)
 	}
 }
 
@@ -455,7 +456,7 @@ func TestMaterializeConfig_RewritesNestedRuleRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("materializeConfig: %v", err)
 	}
-	nested := persisted.Route.Rules[0].Rules[0].RuleSet
+	nested := withoutMDNSDrop(persisted.Route.Rules)[0].Rules[0].RuleSet
 	if len(nested) != 1 || nested[0] != "geo-telegram-srs" {
 		t.Fatalf("nested ref must be rewritten to the materialized tag, got %v", nested)
 	}
@@ -861,8 +862,8 @@ func TestMaterializeConfig_UnreadableInlineSourceKeepsCompiledArtifact(t *testin
 	if len(out.Route.RuleSet) != 1 || out.Route.RuleSet[0].Path != srsPath {
 		t.Fatalf("rule_set = %+v, want the original artifact %s", out.Route.RuleSet, srsPath)
 	}
-	if out.Route.Rules[0].RuleSet[0] != "legacy-srs" {
-		t.Errorf("rule ref = %q, want legacy-srs", out.Route.Rules[0].RuleSet[0])
+	if withoutMDNSDrop(out.Route.Rules)[0].RuleSet[0] != "legacy-srs" {
+		t.Errorf("rule ref = %q, want legacy-srs", withoutMDNSDrop(out.Route.Rules)[0].RuleSet[0])
 	}
 	if data, err := os.ReadFile(srsPath); err != nil || string(data) != "compiled" {
 		t.Errorf("compiled artifact must stay untouched, got %q (%v)", data, err)

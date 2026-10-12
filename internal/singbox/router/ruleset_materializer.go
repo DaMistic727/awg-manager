@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -169,7 +170,27 @@ func (m ruleSetMaterializer) materializeConfig(slot orchestrator.Slot, cfg *Rout
 	}
 	applyHTTPClients(&out)
 	applyDNSRuleSetMatchSource(&out)
+	out.Route.Rules = append([]Rule{mdnsDropRule}, withoutMDNSDrop(out.Route.Rules)...)
 	return &out, nil
+}
+
+// mdnsDropRule отбивает mDNS (UDP/5353) до hijack-dns (#1037, F636). Сниффер
+// sing-box опознаёт mDNS-запрос как DNS на любом порту; `local.` уходит на
+// сервер type local, тот шлёт мультикаст во все multicast-интерфейсы, включая
+// t2s*, а оттуда пакет через SOCKS возвращается в sing-box — петля без
+// ограничителя. mDNS не маршрутизируется, через прокси ему делать нечего.
+// Правило живёт только в конфиге на диске: restoreConfig его снимает, так что
+// UI и индексы правил его не видят.
+var mdnsDropRule = Rule{Port: []int{5353}, Action: "reject"}
+
+func withoutMDNSDrop(rules []Rule) []Rule {
+	out := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		if !reflect.DeepEqual(r, mdnsDropRule) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // applyDNSRuleSetMatchSource помечает каждое DNS-правило со ссылкой на
@@ -386,6 +407,7 @@ func (m ruleSetMaterializer) restoreConfig(cfg *RouterConfig) *RouterConfig {
 	m.rewritePersistedSRSRefsToInline(cfg, &out)
 	m.rewriteSRSSuffixRuleSetRefs(&out)
 	restoreHTTPClients(&out)
+	out.Route.Rules = withoutMDNSDrop(out.Route.Rules)
 	return &out
 }
 

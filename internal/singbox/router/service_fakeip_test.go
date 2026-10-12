@@ -444,9 +444,9 @@ func TestEnableFakeIPTun_SlotFakeIPWritten(t *testing.T) {
 		t.Errorf("21-fakeip.json: fakeip DNS server missing: %s", data)
 	}
 
-	// hijack-dns rule at rules[0] (overlay).
-	if len(cfg.Route.Rules) == 0 || cfg.Route.Rules[0].Action != "hijack-dns" {
-		t.Errorf("21-fakeip.json: route.rules[0] must be hijack-dns, got %+v", cfg.Route.Rules)
+	// hijack-dns rule at rules[1] (overlay), сразу за отбоем mDNS (F636).
+	if len(cfg.Route.Rules) < 2 || cfg.Route.Rules[1].Action != "hijack-dns" {
+		t.Errorf("21-fakeip.json: route.rules[1] must be hijack-dns, got %+v", cfg.Route.Rules)
 	}
 
 	// route.final set (seed provides "direct" or user-set).

@@ -1802,7 +1802,7 @@ func TestUpdateRuleSet_InlineRenameRewritesVisibleAndMaterializedRefs(t *testing
 	if len(cfg.Route.RuleSet) != 1 || cfg.Route.RuleSet[0].Tag != "new-inline-srs" {
 		t.Fatalf("materialized rule_set = %+v", cfg.Route.RuleSet)
 	}
-	if len(cfg.Route.Rules) != 1 || cfg.Route.Rules[0].RuleSet[0] != "new-inline-srs" {
+	if rules := withoutMDNSDrop(cfg.Route.Rules); len(rules) != 1 || rules[0].RuleSet[0] != "new-inline-srs" {
 		t.Fatalf("materialized route refs = %+v", cfg.Route.Rules)
 	}
 	if len(cfg.DNS.Rules) != 1 || cfg.DNS.Rules[0].RuleSet[0] != "new-inline-srs" {
