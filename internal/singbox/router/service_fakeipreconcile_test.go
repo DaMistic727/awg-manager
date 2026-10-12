@@ -943,3 +943,45 @@ func TestReconcileFakeIPTun_HealsTunAddressWithoutFlip(t *testing.T) {
 		t.Errorf("без перехода применять нечего, применений %d", *applies)
 	}
 }
+
+// F634: то же для слота fakeip — tun-in без dns_mode лечится тиком.
+func TestReconcileFakeIPTun_HealsMissingDNSMode(t *testing.T) {
+	h := newFakeIPEnableHarness(t, "")
+	provisionForDisable(t, h)
+
+	all, _ := h.store.Load()
+	sr, _ := NormalizeSingboxRouterSettings(all.SingboxRouter)
+
+	activePath := filepath.Join(h.dir, "21-fakeip.json")
+	raw, err := os.ReadFile(activePath)
+	if err != nil {
+		t.Fatalf("read active: %v", err)
+	}
+	cfg, err := parseRouterConfigBytes(raw)
+	if err != nil {
+		t.Fatalf("parse active: %v", err)
+	}
+	for i := range cfg.Inbounds {
+		if cfg.Inbounds[i].Tag == "tun-in" {
+			cfg.Inbounds[i].DNSMode = ""
+		}
+	}
+	if err := h.svc.persistFakeIPConfig(context.Background(), cfg); err != nil {
+		t.Fatalf("persistFakeIPConfig: %v", err)
+	}
+
+	if err := h.svc.reconcileFakeIPTun(context.Background(), sr); err != nil {
+		t.Fatalf("reconcileFakeIPTun: %v", err)
+	}
+	raw, err = os.ReadFile(activePath)
+	if err != nil {
+		t.Fatalf("read active (после): %v", err)
+	}
+	after, err := parseRouterConfigBytes(raw)
+	if err != nil {
+		t.Fatalf("parse active (после): %v", err)
+	}
+	if got := findInbound(after, "tun-in").DNSMode; got != "hijack" {
+		t.Errorf("dns_mode = %q, want hijack", got)
+	}
+}

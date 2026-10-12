@@ -1,6 +1,10 @@
 package router
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestEnsurePolicyTunInbound(t *testing.T) {
 	in := []Inbound{
@@ -30,6 +34,11 @@ func TestEnsurePolicyTunInbound(t *testing.T) {
 	if tun.AutoRoute == nil || *tun.AutoRoute || tun.AutoRedirect == nil || *tun.AutoRedirect ||
 		tun.StrictRoute == nil || *tun.StrictRoute {
 		t.Fatalf("auto_* must be explicit false: %+v", tun)
+	}
+	// F634: без явного hijack sing-box ≥1.15.0-alpha.12 при auto_route=false
+	// не ловит DNS на адрес tun.
+	if raw, _ := json.Marshal(tun); !strings.Contains(string(raw), `"dns_mode":"hijack"`) {
+		t.Fatalf("dns_mode must be hijack: %s", raw)
 	}
 	if len(tun.Address) != 2 {
 		t.Fatalf("address: %v", tun.Address)

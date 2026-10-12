@@ -56,6 +56,11 @@ func TestEnsureFakeIPOverlay_StackNoGSOOrEIN(t *testing.T) {
 			if hasStack := strings.Contains(string(raw), `"stack"`); hasStack != (tc.wantStk != "") {
 				t.Errorf("ключ stack в JSON = %v при stack=%q: %s", hasStack, tc.wantStk, raw)
 			}
+			// F634: fakeip-DNS клиентов идёт на адрес tun и ловится только
+			// hijack; sing-box ≥1.15.0-alpha.12 без auto_route его не включает.
+			if !strings.Contains(string(raw), `"dns_mode":"hijack"`) {
+				t.Errorf("dns_mode must be hijack, got: %s", raw)
+			}
 			if strings.Contains(string(raw), `"gso"`) {
 				t.Errorf("marshaled tun inbound must not carry gso, got: %s", raw)
 			}

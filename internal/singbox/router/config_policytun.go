@@ -65,6 +65,7 @@ func ensurePolicyTunInbound(in []Inbound, spec PolicyTunInboundSpec) []Inbound {
 		AutoRedirect:  boolPtr(false),
 		StrictRoute:   boolPtr(false),
 		Stack:         spec.Stack,
+		DNSMode:       tunDNSMode,
 		UDPTimeout:    resolveUDPTimeout(spec.UDPTimeout),
 		UDPNATMax:     spec.UDPNATMax,
 

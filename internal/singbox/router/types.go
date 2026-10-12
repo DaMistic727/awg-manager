@@ -303,6 +303,9 @@ type Inbound struct {
 	AutoRedirect  *bool    `json:"auto_redirect,omitempty"`
 	StrictRoute   *bool    `json:"strict_route,omitempty"`
 	Stack         string   `json:"stack,omitempty"`
+	// DNSMode — tunDNSMode (см. там), иначе sing-box ≥1.15.0-alpha.12 без
+	// auto_route выключает перехват DNS на адрес tun.
+	DNSMode string `json:"dns_mode,omitempty"`
 	// ExternalConfiguration (форк sing-box): адрес tun'а ставит и держит
 	// NDMS, sing-tun его не добавляет и не снимает при Close/SIGHUP.
 	ExternalConfiguration bool `json:"external_configuration,omitempty"`

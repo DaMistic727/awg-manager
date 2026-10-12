@@ -2418,3 +2418,32 @@ func TestApplyStaging_KeepsAppliedTunExternalConfiguration(t *testing.T) {
 		t.Error("черновик перекинул флаг мимо тика")
 	}
 }
+
+// F634: слот, записанный до явного dns_mode, несёт tun-in без него — на
+// sing-box ≥1.15.0-alpha.12 это выключенный перехват DNS. Тик Reconcile
+// обязан дописать hijack, не дожидаясь перевключения режима.
+func TestReconcilePolicyTun_HealsMissingDNSMode(t *testing.T) {
+	h := newPolicyTunEnableHarness(t, "")
+	sr := provisionPolicyTunForReconcile(t, h)
+	h.svc.deps.RunningConfig = &fakeRunningConfig{lines: healthyPolicyTunRC("OpkgTun0")}
+
+	cfg, err := h.svc.loadAppliedRouterConfig()
+	if err != nil {
+		t.Fatalf("loadAppliedRouterConfig: %v", err)
+	}
+	for i := range cfg.Inbounds {
+		if cfg.Inbounds[i].Tag == "tun-in" {
+			cfg.Inbounds[i].DNSMode = ""
+		}
+	}
+	if err := h.svc.persistConfigDirect(context.Background(), cfg); err != nil {
+		t.Fatalf("persistConfigDirect: %v", err)
+	}
+
+	if err := h.svc.reconcilePolicyTun(context.Background(), sr); err != nil {
+		t.Fatalf("reconcilePolicyTun: %v", err)
+	}
+	if got := policyTunInbound(t, h).DNSMode; got != "hijack" {
+		t.Errorf("dns_mode = %q, want hijack", got)
+	}
+}

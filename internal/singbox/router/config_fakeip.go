@@ -43,6 +43,13 @@ type FakeIPTunSpec struct {
 // what fakeip-tun must NOT enable because NDMS owns routing).
 func boolPtr(v bool) *bool { return &v }
 
+// tunDNSMode пишется в tun-инбаунды явно (F634). С hijack sing-box заворачивает
+// в свой DNS всё, что идёт на соседний адрес tun (DeriveTunDNS) — так клиенты
+// fakeip получают ответы: правило hijack-dns {protocol: dns} без sniff перед ним
+// этот трафик не ловит. До 1.15.0-alpha.12 hijack был умолчанием всегда, теперь
+// только при auto_route, а он у нас выключен.
+const tunDNSMode = "hijack"
+
 // ensureFakeIPOverlay injects/normalizes the ENGINE-LOCKED bits of fakeip-tun
 // mode into a user-edited *RouterConfig. It is idempotent: calling it multiple
 // times with the same spec produces exactly one of each locked element.
@@ -83,6 +90,7 @@ func ensureFakeIPOverlay(cfg *RouterConfig, spec FakeIPTunSpec) {
 		AutoRedirect:  boolPtr(false),
 		StrictRoute:   boolPtr(false),
 		Stack:         spec.Stack,
+		DNSMode:       tunDNSMode,
 		UDPTimeout:    udpTimeout,
 		UDPNATMax:     spec.UDPNATMax,
 

@@ -1149,13 +1149,16 @@ func (s *ServiceImpl) healTunSettings(ctx context.Context, slot orchestrator.Slo
 		external = in.ExternalConfiguration
 	}
 	inboundOK := in.UDPTimeout == effective && in.UDPNATMax == sr.UDPNATMax &&
-		in.Stack == sr.FakeIPStack && in.ExternalConfiguration == external
+		in.Stack == sr.FakeIPStack && in.ExternalConfiguration == external &&
+		in.DNSMode == tunDNSMode
 	if inboundOK && systemUDPTimeoutRuleOK(cfg.Route.Rules, effective) {
 		return
 	}
 	in.UDPTimeout = effective
 	in.UDPNATMax = sr.UDPNATMax
 	in.Stack = sr.FakeIPStack
+	// Слоты, записанные до F634, несут tun-in без dns_mode.
+	in.DNSMode = tunDNSMode
 	flip := external && !in.ExternalConfiguration
 	in.ExternalConfiguration = external
 	cfg.EnsureUDPTimeoutRule(effective)
