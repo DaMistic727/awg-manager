@@ -924,7 +924,7 @@
 	"tunnel_edit_backend_nativewg_desc": "DNS/IP маршрутизация, failover, виден в UI роутера",
 	"tunnel_edit_backend_kernel_unloaded": "Модуль ядра не загружен",
 	"tunnel_edit_backend_kernel_desc": "Через OpkgTun и модуль ядра, с поддержкой до AWG 3.1",
-	"tunnel_edit_new_supported_hint": "Поддерживаются WireGuard и AmneziaWG конфигурации с параметрами Jc, Jmin, Jmax, S1-S4, H1-H4, I1-I5; вкладка vpn:// распознаёт клиентский конфиг в ссылке; ключ Amnezia Premium обслуживает отдельный мастер подписки.",
+	"tunnel_edit_new_supported_hint": "Поддерживаются WireGuard и AmneziaWG конфигурации с параметрами Jc, Jmin, Jmax, S1-S4, H1-H4, I1-I5; вкладка vpn:// распознаёт клиентский конфиг в ссылке; ключ Amnezia Premium не поддерживается.",
 	"tunnel_detail_tab_basic": "Основное",
 	"tunnel_detail_tab_obfuscator": "Обфускатор",
 	"tunnel_detail_tab_obfuscation": "Обфускация",

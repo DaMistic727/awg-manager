@@ -906,7 +906,7 @@
 	"tunnel_edit_backend_nativewg_desc": "DNS/IP routing, failover, visible in the router UI",
 	"tunnel_edit_backend_kernel_unloaded": "Kernel module is not loaded",
 	"tunnel_edit_backend_kernel_desc": "Via OpkgTun and the kernel module, supports up to AWG 3.1",
-	"tunnel_edit_new_supported_hint": "WireGuard and AmneziaWG configurations with the parameters Jc, Jmin, Jmax, S1-S4, H1-H4, I1-I5 are supported; the vpn:// tab recognizes a client config inside a link; an Amnezia Premium key is handled by a separate subscription wizard.",
+	"tunnel_edit_new_supported_hint": "WireGuard and AmneziaWG configurations with the parameters Jc, Jmin, Jmax, S1-S4, H1-H4, I1-I5 are supported; the vpn:// tab recognizes a client config inside a link; an Amnezia Premium key is not supported.",
 	"tunnel_detail_tab_basic": "Basic",
 	"tunnel_detail_tab_obfuscator": "Obfuscator",
 	"tunnel_detail_tab_obfuscation": "Obfuscation",
