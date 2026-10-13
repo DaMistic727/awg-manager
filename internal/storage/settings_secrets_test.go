@@ -24,11 +24,6 @@ func TestSaveSettings_DroppedSecretLeavesBak(t *testing.T) {
 		drop func(*Settings)
 	}{
 		{
-			name: "ключ подписки Amnezia",
-			set:  func(s *Settings) { s.AmneziaPremiumKeyCipher = secret },
-			drop: func(s *Settings) { s.AmneziaPremiumKeyCipher = "" },
-		},
-		{
 			name: "apiKey панели",
 			set:  func(s *Settings) { s.ApiKey = secret },
 			drop: func(s *Settings) { s.ApiKey = "" },
@@ -285,15 +280,14 @@ func readFile(t *testing.T, path string) string {
 // падение было адресным, если поле вдруг получит json:"-".
 func TestSettings_SecretsAreSerialized(t *testing.T) {
 	s := Settings{
-		ApiKey:                  "a",
-		AmneziaPremiumKeyCipher: "b",
-		ManagedServers:          []ManagedServer{{InterfaceName: "srv", PrivateKey: "c"}},
+		ApiKey:         "a",
+		ManagedServers: []ManagedServer{{InterfaceName: "srv", PrivateKey: "c"}},
 	}
 	raw, err := json.Marshal(&s)
 	if err != nil {
 		t.Fatalf("маршалинг: %v", err)
 	}
-	for _, want := range []string{"apiKey", "amneziaPremiumKeyCipher", "privateKey"} {
+	for _, want := range []string{"apiKey", "privateKey"} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("поле %q не сериализуется — поиск секретов его не увидит", want)
 		}

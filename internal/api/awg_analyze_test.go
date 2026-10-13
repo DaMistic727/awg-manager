@@ -379,3 +379,13 @@ func TestAwgAnalyzeHandler_MethodNotAllowed(t *testing.T) {
 		t.Fatalf("want 405, got %d", w.Code)
 	}
 }
+
+// Анализатор открывается на вкладке уже заведённого туннеля: туннель с
+// адресом подписки Amnezia Premium (заведён до снятия поддержки) обязан
+// анализироваться, а не получать отказ импорта.
+func TestAnalyzeAwgConf_PremiumAddressStillAnalyzed(t *testing.T) {
+	conf := strings.Replace(confPlainWG, "10.8.0.2/32", "100.102.228.17/32", 1)
+	if _, err := analyzeAwgConf(conf, nil, ""); err != nil {
+		t.Fatalf("analyzeAwgConf: %v", err)
+	}
+}

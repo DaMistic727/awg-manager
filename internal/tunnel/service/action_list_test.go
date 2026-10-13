@@ -132,7 +132,7 @@ func TestReplaceConfigNWG_Running_OneList(t *testing.T) {
 	}
 
 	lists := f.ListCalls()
-	if err := s.ReplaceConfig(context.Background(), "awg20", sampleConf, "", ReplaceOptions{}); err != nil {
+	if err := s.ReplaceConfig(context.Background(), "awg20", sampleConf, ""); err != nil {
 		t.Fatal(err)
 	}
 	// Stop работающего туннеля — `interface Wireguard0 up:false` батчем.

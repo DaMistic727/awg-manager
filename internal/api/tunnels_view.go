@@ -187,9 +187,6 @@ func BuildTunnelResponse(r *http.Request, svc TunnelService, store *storage.AWGT
 		resp["pingCheck"] = stored.PingCheck
 		resp["connectivityCheck"] = stored.ConnectivityCheck
 		resp["ispInterfaceLabel"] = stored.ISPInterfaceLabel
-		// Страна подписки: карточка показывает, из какой страны Amnezia
-		// Premium получена текущая конфигурация.
-		resp["amneziaCountry"] = stored.AmneziaCountry
 		backend := stored.Backend
 		if backend == "" {
 			backend = "kernel"
@@ -234,12 +231,6 @@ type tunnelItem struct {
 	// список помечает туннели, принадлежащие прокси-выходу, и без второго
 	// поля метки не было бы ровно у половины из них.
 	FreeTurnClientID string `json:"freeTurnClientId,omitempty"`
-	// AmneziaCountry — страна подписки Amnezia Premium, из которой получена
-	// конфигурация туннеля; пусто у прочих. Мастер читает ИМЕННО список
-	// (главная страница), поэтому поле обязано быть и здесь, а не только в
-	// детальном ответе: иначе метка «этой стране уже соответствует туннель»
-	// не появится никогда.
-	AmneziaCountry string `json:"amneziaCountry,omitempty"`
 	// Locked — при true туннель защищён от изменений (#818).
 	Locked bool `json:"locked,omitempty"`
 	// StatusDetails — человекочитаемая причина состояния (StateInfo.Details),
@@ -293,7 +284,7 @@ func (h *TunnelsHandler) listItems(ctx context.Context) ([]tunnelItem, error) {
 		stored, _ := h.store.Get(t.ID)
 
 		awgVersion := "wg"
-		var endpoint, address, wdttClientID, freeTurnClientID, amneziaCountry string
+		var endpoint, address, wdttClientID, freeTurnClientID string
 		var ispInterface, ispInterfaceLabel string
 		var resolvedISPInterface, resolvedISPInterfaceLabel string
 		var mtu int
@@ -317,7 +308,6 @@ func (h *TunnelsHandler) listItems(ctx context.Context) ([]tunnelItem, error) {
 			ispInterfaceLabel = stored.ISPInterfaceLabel
 			wdttClientID = strings.TrimSpace(stored.WdttClientID)
 			freeTurnClientID = strings.TrimSpace(stored.FreeTurnClientID)
-			amneziaCountry = stored.AmneziaCountry
 
 			// NativeWG stores NDMS IDs (e.g. "ISP"), but frontend uses kernel names (e.g. "eth3").
 			// Convert back so the dropdown can match the stored value.
@@ -419,7 +409,6 @@ func (h *TunnelsHandler) listItems(ctx context.Context) ([]tunnelItem, error) {
 			PingCheck:                 pcInfo,
 			WdttClientID:              wdttClientID,
 			FreeTurnClientID:          freeTurnClientID,
-			AmneziaCountry:            amneziaCountry,
 			Obfuscator:                obfItem(stored, t.StateInfo.RelayBackend),
 		}
 		if item.Obfuscator != nil {

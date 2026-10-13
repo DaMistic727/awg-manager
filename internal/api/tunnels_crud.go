@@ -847,11 +847,6 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 	req, ok := parseJSON[struct {
 		Content string `json:"content"`
 		Name    string `json:"name"`
-		// AmneziaCountry — страна подписки Amnezia Premium, из которой взята
-		// НОВАЯ конфигурация. Поле шлёт мастер; замена файлом его не шлёт, и
-		// прежняя метка обязана исчезнуть — иначе пользователь видел бы
-		// привязку к стране у конфигурации, к подписке не относящейся.
-		AmneziaCountry string `json:"amneziaCountry"`
 	}](w, r, http.MethodPost)
 	if !ok {
 		return
@@ -859,6 +854,12 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 
 	if req.Content == "" {
 		response.BadRequest(w, "missing config content")
+		return
+	}
+	// До svc.Stop ниже: отказ в ReplaceConfig оставил бы работающий туннель
+	// выключенным.
+	if err := config.RejectAmneziaPremium(req.Content); err != nil {
+		response.Error(w, err.Error(), "AMNEZIA_PREMIUM_UNSUPPORTED")
 		return
 	}
 
@@ -905,12 +906,9 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Replace config. Страна едет в ту же запись, что и сама конфигурация:
-	// отдельного сохранения из handler'а здесь нет — оно было бы вторым
-	// циклом записи на флеш и окном рассогласования.
+	// Replace config
 	var warnings []string
-	opts := service.ReplaceOptions{AmneziaCountry: &req.AmneziaCountry}
-	if err := h.svc.ReplaceConfig(r.Context(), id, req.Content, req.Name, opts); err != nil {
+	if err := h.svc.ReplaceConfig(r.Context(), id, req.Content, req.Name); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			response.ErrorWithStatus(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
 			return

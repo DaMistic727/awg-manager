@@ -18,13 +18,9 @@ import (
 // который страница настроек показывает и даёт скопировать.
 //
 // В списке НЕТ полей managedServers, serverPeerSecrets, serverInterfaceMeta,
-// amneziaPremiumKeyCipher, singboxRouter, opkgTun, dnsChainPreset и прочей
+// singboxRouter, opkgTun, dnsChainPreset и прочей
 // backend-managed записи владения: фронт их не читает, а половина несёт
 // ключевой материал.
-//
-// Нет и amneziaPremiumMirrorUrl: адрес зеркала Amnezia принадлежит мастеру
-// premium — его читают и пишут ручки premium, а общая страница настроек его
-// не показывает и никогда не читала.
 //
 // Отсутствует и hiddenSystemTunnels, объявленный в рукописном типе фронта:
 // поля с таким именем нет ни в storage.Settings, ни в SettingsPatch, и ни

@@ -82,7 +82,7 @@ func TestLoggingMiddleware_PanicReachesTheLog(t *testing.T) {
 	}))
 
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/amnezia/premium/catalog", nil))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/tunnels/list", nil))
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("код = %d, want %d", w.Code, http.StatusInternalServerError)
@@ -99,7 +99,7 @@ func TestLoggingMiddleware_PanicReachesTheLog(t *testing.T) {
 	if !strings.Contains(e.message, "взорвалось") {
 		t.Errorf("в записи нет значения паники: %q", e.message)
 	}
-	if !strings.Contains(e.message, "/api/amnezia/premium/catalog") || !strings.Contains(e.message, http.MethodPost) {
+	if !strings.Contains(e.message, "/api/tunnels/list") || !strings.Contains(e.message, http.MethodPost) {
 		t.Errorf("в записи нет запроса, на котором упало: %q", e.message)
 	}
 	// Кадр самого перехвата — доказательство, что приехал стек, а не только текст.

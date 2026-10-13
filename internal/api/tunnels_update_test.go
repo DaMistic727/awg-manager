@@ -24,8 +24,8 @@ import (
 // H1-H4, I1-I5, Qlen) and the user expects them to land in storage. Earlier
 // the whitelist always preserved AWG params from existing, silently
 // discarding every UI edit; the regression manifested as "save" being a
-// no-op for an Amnezia-Premium tunnel where the user wanted to clear or
-// regenerate the I1 signature packet.
+// no-op for a tunnel where the user wanted to clear or regenerate the I1
+// signature packet.
 func TestMergeInterfaceWhitelist_AppliesAWGParamsFromRequest(t *testing.T) {
 	existing := &storage.AWGTunnel{
 		Interface: storage.AWGInterface{
@@ -294,9 +294,6 @@ type stubTunnelSvc struct {
 
 	replaceCalls int
 	replaceErr   error
-	// replaceOpts — опции ПОСЛЕДНЕЙ замены: по ним видно, какую семантику
-	// страны handler передал сервису (nil = «не трогать»).
-	replaceOpts  service.ReplaceOptions
 	replaceNames []string
 
 	setEnabledCalls      []toggleCall
@@ -350,9 +347,8 @@ func (s *stubTunnelSvc) SetDefaultRoute(_ context.Context, id string, v bool) er
 func (s *stubTunnelSvc) Import(context.Context, string, string, string, service.ImportLink) (*service.TunnelWithStatus, error) {
 	return nil, fmt.Errorf("stub")
 }
-func (s *stubTunnelSvc) ReplaceConfig(_ context.Context, _, _, newName string, opts service.ReplaceOptions) error {
+func (s *stubTunnelSvc) ReplaceConfig(_ context.Context, _, _, newName string) error {
 	s.replaceCalls++
-	s.replaceOpts = opts
 	s.replaceNames = append(s.replaceNames, newName)
 	return s.replaceErr
 }
@@ -854,13 +850,9 @@ func TestTunnelUpdate_FieldInventoryComplete(t *testing.T) {
 		"ResolvedEndpointIP": true,
 		"WdttClientID":       true,
 		"FreeTurnClientID":   true,
-		// AmneziaCountry владеют импорт и замена конфигурации: метка обязана
-		// жить ровно столько, сколько конфигурация, которую она описывает.
-		// Правка карточкой развязала бы её с конфигом.
-		"AmneziaCountry": true,
-		"RawKernelIface": true,
-		"RawNdmsIface":   true,
-		"Locked":         true,
+		"RawKernelIface":     true,
+		"RawNdmsIface":       true,
+		"Locked":             true,
 	}
 
 	rt := reflect.TypeOf(storage.AWGTunnel{})

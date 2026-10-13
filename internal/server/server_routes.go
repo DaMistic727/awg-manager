@@ -546,29 +546,6 @@ func (s *Server) registerLogsImportRoutes(mux *http.ServeMux, h *routeHandlers) 
 	// Import (protected + boot guarded)
 	mux.HandleFunc("/api/import/conf", h.guarded(h.importHandler.ImportConf))
 
-	// Ключ подписки Amnezia Premium: проверка и сохранение (POST), состояние
-	// (GET), удаление (DELETE). Одна ручка на три метода — состояние у них
-	// одно, и разводить его по трём путям нечем.
-	amneziaPremiumHandler := api.NewAmneziaPremiumHandler(s.settings, h.appLog)
-	amneziaPremiumHandler.SetEventBus(s.bus)
-	mux.HandleFunc("/api/amnezia/premium/key", h.guarded(amneziaPremiumHandler.Key))
-	// Каталог подписки (GET) и выдача конфигурации страны (POST). Пути
-	// разные, потому что операции разные: первая читает, вторая ТРАТИТ слот
-	// устройств подписки.
-	mux.HandleFunc("/api/amnezia/premium/catalog", h.guarded(amneziaPremiumHandler.Catalog))
-	mux.HandleFunc("/api/amnezia/premium/config", h.guarded(amneziaPremiumHandler.Config))
-	// Отзыв конфигурации страны (POST) — обратная выдаче операция, ВОЗВРАЩАЕТ
-	// слот. Отдельный путь по той же причине, по какой выдача отделена от
-	// каталога: разные последствия для подписки.
-	mux.HandleFunc("/api/amnezia/premium/revoke", h.guarded(amneziaPremiumHandler.Revoke))
-	// Адрес зеркала: действующий (GET) и запись (POST). Живёт здесь, а не в
-	// настройках, — поле принадлежит мастеру premium.
-	mux.HandleFunc("/api/amnezia/premium/mirror", h.guarded(amneziaPremiumHandler.Mirror))
-	// Страна подключения: сохранённая (GET) и запись (POST). Портал требует
-	// её в каждой выдаче конфигурации, и живёт она там же, где зеркало,  —
-	// у мастера premium, а не в общих настройках.
-	mux.HandleFunc("/api/amnezia/premium/declared-country", h.guarded(amneziaPremiumHandler.DeclaredCountry))
-
 	// External tunnels (protected + boot guarded)
 	mux.HandleFunc("/api/external-tunnels", h.guarded(h.externalHandler.List))
 	mux.HandleFunc("/api/external-tunnels/adopt", h.guarded(h.externalHandler.Adopt))

@@ -81,7 +81,7 @@ func TestReplaceConfig_RenameByteLimit(t *testing.T) {
 			if err := s.store.Create(&storage.AWGTunnel{ID: "awg10", Name: "Germany", Backend: "kernel"}); err != nil {
 				t.Fatal(err)
 			}
-			err := s.ReplaceConfig(context.Background(), "awg10", sampleConf, tc.newName, ReplaceOptions{})
+			err := s.ReplaceConfig(context.Background(), "awg10", sampleConf, tc.newName)
 			got, _ := s.store.Get("awg10")
 			if tc.ok {
 				if err != nil || got.Name != tc.newName {
@@ -118,7 +118,7 @@ func TestReplaceConfig_KernelRenameSyncsDescription(t *testing.T) {
 			if err := s.store.Create(&storage.AWGTunnel{ID: "awg10", Name: "Germany", Backend: "kernel"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.ReplaceConfig(context.Background(), "awg10", sampleConf, tc.newName, ReplaceOptions{}); err != nil {
+			if err := s.ReplaceConfig(context.Background(), "awg10", sampleConf, tc.newName); err != nil {
 				t.Fatalf("ReplaceConfig: %v", err)
 			}
 			if !reflect.DeepEqual(op.UpdateDescriptionCalls, tc.want) {
@@ -135,7 +135,7 @@ func TestReplaceConfig_SameLongNameNotRejected(t *testing.T) {
 	if err := s.store.Create(&storage.AWGTunnel{ID: "awg10", Name: name257, Backend: "kernel"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ReplaceConfig(context.Background(), "awg10", sampleConf, name257, ReplaceOptions{}); err != nil {
+	if err := s.ReplaceConfig(context.Background(), "awg10", sampleConf, name257); err != nil {
 		t.Fatalf("ReplaceConfig с тем же именем: %v", err)
 	}
 }

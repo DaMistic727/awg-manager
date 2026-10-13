@@ -19,7 +19,7 @@
 	function normalizeTunnelImportTab(raw: string | null): TunnelImportTab {
 		if (raw === 'file' || raw === 'paste' || raw === 'vpn') return raw;
 		if (raw === 'phobos' || raw === 'clusterm') return raw;
-		if (raw === 'link' || raw === 'premium') return 'vpn';
+		if (raw === 'link') return 'vpn';
 		return 'file';
 	}
 

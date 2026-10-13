@@ -46,7 +46,7 @@ type TunnelService interface {
 	Import(ctx context.Context, confContent, name, backend string, link service.ImportLink) (*service.TunnelWithStatus, error)
 
 	// ReplaceConfig replaces a tunnel's config from a new .conf file.
-	ReplaceConfig(ctx context.Context, tunnelID, confContent, newName string, opts service.ReplaceOptions) error
+	ReplaceConfig(ctx context.Context, tunnelID, confContent, newName string) error
 
 	// SyncDescription — описание НАШЕЙ записи в NDMS = name; prevName — имя
 	// до переименования, по нему проверяется владение (F517).

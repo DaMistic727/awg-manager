@@ -4,14 +4,10 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/hoaxisr/awg-manager/internal/proxyrt/instancestore"
@@ -356,11 +352,8 @@ func TestExportSkipsDeviceKey(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), []byte(`{"version":32}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.NewDeviceCipher(dataDir).Encrypt("vpn://test-key-export"); err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dataDir, storage.DeviceKeyFile)); err != nil {
-		t.Fatalf("секрет не создан, тест бессмысленен: %v", err)
+	if err := os.WriteFile(filepath.Join(dataDir, storage.DeviceKeyFile), bytes.Repeat([]byte("k"), 32), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dataDir, storage.RCITokenFile), []byte("tok\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -389,47 +382,6 @@ func TestExportSkipsDeviceKey(t *testing.T) {
 	}
 	if !settingsFound {
 		t.Fatalf("settings.json не попал в архив: %v", names)
-	}
-}
-
-// Восстановление СВОЕГО бэкапа на СВОЁМ роутере не должно ронять ключ
-// подписки: секрета в архиве нет по построению, и Restore оставляет
-// существующий на месте.
-func TestRestoreCarriesDeviceKey(t *testing.T) {
-	root := t.TempDir()
-	dataDir := filepath.Join(root, "awg-manager")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), []byte(`{"version":32}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	token, err := storage.NewDeviceCipher(dataDir).Encrypt("vpn://test-key-restore")
-	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-
-	var buf bytes.Buffer
-	if err := Export(dataDir, "2.18.2", &buf); err != nil {
-		t.Fatalf("Export: %v", err)
-	}
-	if err := Restore(dataDir, bytes.NewReader(buf.Bytes())); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	info, err := os.Stat(filepath.Join(dataDir, storage.DeviceKeyFile))
-	if err != nil {
-		t.Fatalf("секрет не сохранился: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("права перенесённого секрета %o, want 600", perm)
-	}
-	got, err := storage.NewDeviceCipher(dataDir).Decrypt(token)
-	if err != nil {
-		t.Fatalf("Decrypt после Restore: %v", err)
-	}
-	if got != "vpn://test-key-restore" {
-		t.Fatalf("Decrypt = %q", got)
 	}
 }
 
@@ -499,32 +451,6 @@ func forgedArchive(t *testing.T, files map[string]string) []byte {
 // бэкапа, и переименование константы не должно молча чинить такой тест.
 const validManifestJSON = `{"version":1,"type":"awg-manager-full-backup"}`
 
-// settingsWithKey/keyFromSettings — settings.json ровно в той роли, в какой
-// он участвует в задаче: носитель шифротекста ключа подписки.
-func settingsWithKey(t *testing.T, dir, token string) {
-	t.Helper()
-	raw, err := json.Marshal(map[string]string{"amneziaSubscriptionKey": token})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "settings.json"), raw, 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func keyFromSettings(t *testing.T, dir string) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(dir, "settings.json"))
-	if err != nil {
-		t.Fatalf("settings.json: %v", err)
-	}
-	var m map[string]string
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatalf("settings.json: %v", err)
-	}
-	return m["amneziaSubscriptionKey"]
-}
-
 // Секрет устройства не приезжает ИЗ архива: файл, который принципиально не
 // кладут в бэкап, принципиально же нельзя из бэкапа и доставать. Иначе
 // «вот готовый бэкап, восстановите у себя» отдаёт автору архива секрет
@@ -569,11 +495,8 @@ func TestRestoreIgnoresDeviceKeyFromArchive(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), []byte(`{"version":31}`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := storage.NewDeviceCipher(dataDir).Encrypt("vpn://test-key-own"); err != nil {
-			t.Fatalf("Encrypt: %v", err)
-		}
-		own, err := os.ReadFile(filepath.Join(dataDir, storage.DeviceKeyFile))
-		if err != nil {
+		own := bytes.Repeat([]byte("o"), 32)
+		if err := os.WriteFile(filepath.Join(dataDir, storage.DeviceKeyFile), own, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		ownID, err := storage.LoadOrCreateInstanceID(dataDir)
@@ -629,65 +552,6 @@ func TestExportSkipsQuarantinedDeviceKey(t *testing.T) {
 	}
 	if !settingsFound {
 		t.Fatalf("settings.json не попал в архив: %v", names)
-	}
-}
-
-// Восстановление ЧУЖОГО бэкапа: свой секрет на месте, а шифротекст пришёл
-// чужой. Причина обязана быть различимой — «ключ непригоден»
-// (ErrDeviceCiphertext), а не «ключа нет» (ErrDeviceKeyMissing): от этого
-// зависит, сотрёт вызывающий сохранённый ключ или оставит его с
-// признаком usable:false.
-func TestRestoreForeignBackupYieldsUnusableKey(t *testing.T) {
-	root := t.TempDir()
-	foreign := filepath.Join(root, "foreign")
-	if err := os.MkdirAll(foreign, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	foreignToken, err := storage.NewDeviceCipher(foreign).Encrypt("vpn://test-key-foreign")
-	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-	settingsWithKey(t, foreign, foreignToken)
-	var buf bytes.Buffer
-	if err := Export(foreign, "2.18.2", &buf); err != nil {
-		t.Fatalf("Export: %v", err)
-	}
-
-	dataDir := filepath.Join(root, "awg-manager")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	ownToken, err := storage.NewDeviceCipher(dataDir).Encrypt("vpn://test-key-own")
-	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-	settingsWithKey(t, dataDir, ownToken)
-	own, err := os.ReadFile(filepath.Join(dataDir, storage.DeviceKeyFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Restore(dataDir, bytes.NewReader(buf.Bytes())); err != nil {
-		t.Fatalf("Restore: %v", err)
-	}
-
-	token := keyFromSettings(t, dataDir)
-	if token != foreignToken {
-		t.Fatalf("в settings.json не чужой шифротекст: %q", token)
-	}
-	_, err = storage.NewDeviceCipher(dataDir).Decrypt(token)
-	if !errors.Is(err, storage.ErrDeviceCiphertext) {
-		t.Fatalf("Decrypt = %v, ждали %v", err, storage.ErrDeviceCiphertext)
-	}
-	if errors.Is(err, storage.ErrDeviceKeyMissing) {
-		t.Fatalf("Decrypt отдал «ключа нет» вместо «ключ непригоден»: %v", err)
-	}
-	after, err := os.ReadFile(filepath.Join(dataDir, storage.DeviceKeyFile))
-	if err != nil {
-		t.Fatalf("свой секрет не пережил восстановление: %v", err)
-	}
-	if !bytes.Equal(after, own) {
-		t.Fatal("секрет после восстановления чужого бэкапа не свой")
 	}
 }
 
@@ -870,93 +734,6 @@ func TestRestoreRejectsSettingsAsDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
 		t.Fatalf("каталог данных создан отвергнутым архивом: err=%v", err)
-	}
-}
-
-// Т4. Имя временного файла секрета обязано начинаться с ".device-key.": из
-// архива его держит ровно этот префикс (shouldSkip), а не отдельное правило.
-// Осиротевший после сбоя питания временный файл — это ЖИВОЙ секрет установки,
-// и уехать в архив, который пользователь шлёт в поддержку и кладёт в облако,
-// он не имеет права.
-//
-// Имя берётся у самого storage, а не повторяется здесь литералом: inotify
-// показывает, что реально создано в каталоге, поэтому смена префикса в
-// storage красит этот тест, а не переезжает вместе с ним.
-func TestExportSkipsDeviceKeyTempFile(t *testing.T) {
-	dataDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), []byte(`{"version":32}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	fd, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
-	if err != nil {
-		t.Fatalf("inotify_init1: %v", err)
-	}
-	defer syscall.Close(fd)
-	if _, err := syscall.InotifyAddWatch(fd, dataDir, syscall.IN_CREATE); err != nil {
-		t.Fatalf("inotify_add_watch: %v", err)
-	}
-	secret := bytes.Repeat([]byte("k"), 32)
-	if err := storage.PublishDeviceKey(dataDir, secret); err != nil {
-		t.Fatalf("PublishDeviceKey: %v", err)
-	}
-	tempName := ""
-	for _, name := range inotifyCreated(t, fd) {
-		if name != storage.DeviceKeyFile {
-			tempName = name
-		}
-	}
-	if tempName == "" {
-		t.Fatal("временный файл секрета не замечен — проверка не состоялась")
-	}
-
-	// Сбой питания между записью и получением целевого имени: временный файл
-	// остаётся в каталоге данных, и его застаёт выгрузка.
-	if err := os.WriteFile(filepath.Join(dataDir, tempName), secret, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	if err := Export(dataDir, "2.18.2", &buf); err != nil {
-		t.Fatalf("Export: %v", err)
-	}
-	names := tarNames(t, buf.Bytes())
-	settingsFound := false
-	for _, name := range names {
-		if name == tempName {
-			t.Fatalf("временный файл секрета %q попал в архив: %v", tempName, names)
-		}
-		if name == "settings.json" {
-			settingsFound = true
-		}
-	}
-	if !settingsFound {
-		t.Fatalf("settings.json не попал в архив: %v", names)
-	}
-}
-
-// inotifyCreated вычитывает очередь событий целиком и отдаёт имена созданных
-// записей. События кладутся в очередь внутри самой операции над каталогом,
-// поэтому к возврату вызова они уже там: ждать нечего, от времени проверка не
-// зависит. Тест линуксовый по построению; проект работает только на Linux.
-func inotifyCreated(t *testing.T, fd int) []string {
-	t.Helper()
-	const header = 16 // int32 wd + uint32 mask + uint32 cookie + uint32 len
-	var out []string
-	buf := make([]byte, 16*1024)
-	for {
-		n, err := syscall.Read(fd, buf)
-		if err == syscall.EAGAIN {
-			return out
-		}
-		if err != nil {
-			t.Fatalf("чтение очереди inotify: %v", err)
-		}
-		for off := 0; off+header <= n; {
-			nameLen := int(binary.NativeEndian.Uint32(buf[off+12:]))
-			name := string(bytes.SplitN(buf[off+header:off+header+nameLen], []byte{0}, 2)[0])
-			out = append(out, name)
-			off += header + nameLen
-		}
 	}
 }
 

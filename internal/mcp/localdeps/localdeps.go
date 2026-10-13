@@ -712,7 +712,7 @@ func (l *Local) ImportTunnel(ctx context.Context, name, cfg string) (mcpsrv.Tunn
 			if stored.PingCheck != nil {
 				return storage.ErrNoChange
 			}
-			stored.PingCheck = storage.DefaultTunnelPingCheckFor(stored.AmneziaCountry)
+			stored.PingCheck = storage.DefaultTunnelPingCheck()
 			return nil
 		})
 		if err != nil {
@@ -741,16 +741,17 @@ func (l *Local) ReplaceTunnelConfig(ctx context.Context, id, cfg, newName string
 	if err := l.rejectLocked(id); err != nil {
 		return nil, err
 	}
+	// До Stop: отказ в ReplaceConfig оставил бы работающий туннель выключенным.
+	if err := config.RejectAmneziaPremium(cfg); err != nil {
+		return nil, err
+	}
 	wasRunning := l.c.Tunnels.GetState(ctx, id).State == tunnel.StateRunning
 	if wasRunning {
 		if err := l.c.Tunnels.Stop(ctx, id); err != nil {
 			return nil, fmt.Errorf("failed to stop tunnel before config replace: %w", err)
 		}
 	}
-	// Страна подписки инструменту MCP неизвестна и им не трогается (nil):
-	// "" стирало бы метку страны у туннеля мастера на любой замене конфига
-	// извне.
-	if err := l.c.Tunnels.ReplaceConfig(ctx, id, cfg, newName, service.ReplaceOptions{}); err != nil {
+	if err := l.c.Tunnels.ReplaceConfig(ctx, id, cfg, newName); err != nil {
 		l.tunnelLog.Warn("replace-config", id, "Failed to replace tunnel config (MCP): "+err.Error())
 		return nil, err
 	}

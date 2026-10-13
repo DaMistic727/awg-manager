@@ -85,34 +85,3 @@ func TestDefaultConnectivityCheckURL_IsNotGoogle(t *testing.T) {
 		}
 	}
 }
-
-// Туннель подписки рождается с TCP-пробой, обычный — как прежде. ICMP на
-// выходах коммерческих VPN фильтруется (стенд 2026-09-12: 60-100% потерь
-// даже до 1.1.1.1), так что с методом "icmp" премиум-туннель при включённом
-// мониторинге считался бы мёртвым всегда, а при Restart=true его ещё и
-// перезапускало бы по кругу.
-func TestDefaultTunnelPingCheckFor_PremiumUsesTCPProbe(t *testing.T) {
-	cases := []struct {
-		name    string
-		country string
-		want    string
-	}{
-		{"обычный туннель", "", "icmp"},
-		{"одни пробелы — тоже обычный", "   ", "icmp"},
-		{"туннель подписки", "de", "http"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			pc := DefaultTunnelPingCheckFor(tc.country)
-			if pc.Method != tc.want {
-				t.Fatalf("метод пробы = %q, want %q", pc.Method, tc.want)
-			}
-			// Остальное не расходится с общим умолчанием: мониторинг
-			// по-прежнему opt-in, иначе новый туннель начал бы сам себя
-			// перезапускать.
-			if pc.Enabled {
-				t.Error("мониторинг включён по умолчанию — он обязан быть opt-in")
-			}
-		})
-	}
-}

@@ -1,7 +1,7 @@
 /**
  * Centralized humanization of "service download" errors — geo.dat, AWGM
- * self-update / update check, DNSRoute URL-lists, Amnezia Premium, the
- * download-route list, etc. All of these run through the configurable
+ * self-update / update check, DNSRoute URL-lists, the download-route
+ * list, etc. All of these run through the configurable
  * download route (Direct / AWG-bind / sing-box / subscription), so they
  * share the same failure modes.
  *

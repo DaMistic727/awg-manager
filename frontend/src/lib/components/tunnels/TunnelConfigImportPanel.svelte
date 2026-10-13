@@ -116,8 +116,6 @@
 			<Clipboard size={16} />
 			{m.tunnel_edit_import_tab_paste()}
 		</button>
-		<!-- Подпись и иконка постоянные: подписку обслуживает мастер, и
-		     вкладке больше не нужно превращаться в «Amnezia Premium». -->
 		<button type="button" class="tab" class:tab-active={activeTab === 'vpn'} onclick={activateVpnTab}>
 			<Link size={16} aria-hidden="true" />
 			{m.tunnel_edit_import_tab_link()}

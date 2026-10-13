@@ -101,8 +101,7 @@ func newRuleSetHTTPClient() *http.Client {
 		// и вместо rule-set'а приезжает EOF (Fastly,
 		// raw.githubusercontent.com) или «malformed HTTP response»
 		// (Cloudflare) — ровно та поломка, ради которой httpclient и заведён.
-		// Громкий отказ на старте (ср. panic на nil-журнале в
-		// amneziacp.NewClient) дешевле запасного транспорта: тот был бы
+		// Громкий отказ на старте дешевле запасного транспорта: тот был бы
 		// недостижимым кодом, который живёт и расходится с основным.
 		//
 		// tr == nil не проверяется: NewTransport такого не отдаёт — транспорт

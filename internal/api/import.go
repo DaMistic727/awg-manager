@@ -13,6 +13,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/signature"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/tunnel"
+	"github.com/hoaxisr/awg-manager/internal/tunnel/config"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/service"
 )
 
@@ -69,10 +70,6 @@ type ImportConfRequest struct {
 	InstallURL string `json:"installUrl,omitempty"`
 	// Obfuscator — параметры релея руками (ClusterM). Несовместимо с [instance] в Content.
 	Obfuscator *ObfuscatorImportRequest `json:"obfuscator,omitempty"`
-	// AmneziaCountry — код страны подписки Amnezia Premium, из которой взята
-	// конфигурация. Шлёт его мастер; обычный импорт файла поле не присылает,
-	// и туннель остаётся без метки страны.
-	AmneziaCountry string `json:"amneziaCountry,omitempty"`
 }
 
 // ObfuscatorImportRequest — пользовательские поля релея при ручном вводе.
@@ -115,6 +112,13 @@ func (h *ImportHandler) ImportConf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Отказ здесь, а не только в config.Parse: оттуда текст приходит с
+	// префиксом «parse conf:», а пользователю показывается ровно он.
+	if err := config.RejectAmneziaPremium(req.Content); err != nil {
+		response.Error(w, err.Error(), "AMNEZIA_PREMIUM_UNSUPPORTED")
+		return
+	}
+
 	req.Content = h.patchImportContentForLinkedClient(req.Content, req.FreeTurnClientID, req.WdttClientID)
 
 	if existingID := findLinkedTunnelID(h.store, req.FreeTurnClientID, req.WdttClientID); existingID != "" {
@@ -125,11 +129,7 @@ func (h *ImportHandler) ImportConf(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, "обфускатор нельзя сочетать со связанным прокси-клиентом (wdtt/freeturn)", "OBFUSCATOR_CONFLICT")
 			return
 		}
-		// Страна подписки здесь НЕ трогается (nil): эта ветка — повторный
-		// импорт связанного прокси-клиента (wdtt/freeturn), а не замена
-		// конфигурации из мастера. Передать сюда "" значило бы стирать метку
-		// у чужого туннеля на каждом обновлении клиента.
-		if err := h.svc.ReplaceConfig(r.Context(), existingID, req.Content, req.Name, service.ReplaceOptions{}); err != nil {
+		if err := h.svc.ReplaceConfig(r.Context(), existingID, req.Content, req.Name); err != nil {
 			h.log.Warn("import", req.Name, "Failed to replace linked tunnel: "+err.Error())
 			response.Error(w, err.Error(), "IMPORT_FAILED")
 			return
@@ -156,7 +156,6 @@ func (h *ImportHandler) ImportConf(w http.ResponseWriter, r *http.Request) {
 		WdttClientID:     req.WdttClientID,
 		FreeTurnClientID: req.FreeTurnClientID,
 		Obfuscator:       obf,
-		AmneziaCountry:   req.AmneziaCountry,
 	})
 	if err != nil {
 		h.log.Warn("import", req.Name, "Failed to import tunnel: "+err.Error())
@@ -183,7 +182,7 @@ func (h *ImportHandler) ImportConf(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.Update(tunnel.ID, func(stored *storage.AWGTunnel) error {
 		changed := false
 		if h.pingCheck != nil && stored.PingCheck == nil {
-			stored.PingCheck = storage.DefaultTunnelPingCheckFor(stored.AmneziaCountry)
+			stored.PingCheck = storage.DefaultTunnelPingCheck()
 			changed = true
 		}
 		if !changed {

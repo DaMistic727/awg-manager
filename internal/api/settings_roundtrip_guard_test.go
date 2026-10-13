@@ -139,7 +139,6 @@ func settingsFixtureOverrides() map[string]any {
 		"Settings.Updates.AutoInstallIntervalDays": 23, // 1..30
 		"Settings.Updates.AutoInstallTime":         "19:41",
 		"Settings.SingboxBootstrapDNS":             "172.31.0.7", // только литеральный IP
-		"Settings.AmneziaPremiumMirrorURL":         testMirrorURL,
 		"Settings.Download.RouteTag":               testFixtureRouteTag,
 		"Settings.Download.RouteKind":              testFixtureRouteKind,
 	}

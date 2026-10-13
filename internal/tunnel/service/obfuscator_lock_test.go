@@ -148,7 +148,7 @@ func TestReplaceConfig_PersistsObfuscatorTargetIP(t *testing.T) {
 		t.Fatalf("подготовка: %v", err)
 	}
 
-	if err := s.ReplaceConfig(context.Background(), "awg20", sampleConf, "", ReplaceOptions{}); err != nil {
+	if err := s.ReplaceConfig(context.Background(), "awg20", sampleConf, ""); err != nil {
 		t.Fatalf("ReplaceConfig: %v", err)
 	}
 

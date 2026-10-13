@@ -304,8 +304,8 @@ func (h *SettingsHandler) SetEventBus(bus *events.Bus) { h.bus = bus }
 //
 // Состав списка выведен из фактического потребления фронтом: рукописный тип
 // frontend/src/lib/types/system.ts (export interface Settings) плюс ключ API,
-// который панель показывает. Ключевой материал (AmneziaPremiumKeyCipher,
-// ServerPeerSecrets, ManagedServers/ManagedServer) и backend-managed запись
+// который панель показывает. Ключевой материал (ServerPeerSecrets,
+// ManagedServers/ManagedServer) и backend-managed запись
 // владения (OpkgTun, DNSChainPreset, SingboxRouter, …) сюда не входят вовсе,
 // поэтому уехать наружу им физически неоткуда.
 //

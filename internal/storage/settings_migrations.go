@@ -512,3 +512,20 @@ func (s *SettingsStore) migrateToV39(settings *Settings) {
 func (s *SettingsStore) migrateToV40(settings *Settings) {
 	settings.Updates.StatsEnabled = true
 }
+
+// migrateToV41 — поддержка Amnezia Premium снята. Поля ключа подписки,
+// зеркала и страны подключения структура больше не знает, разбор их уже
+// выбросил; подъём версии заставляет переписать файл, а secretsDropped — и
+// .bak с шифротекстом ключа. Здесь же стирается секрет устройства, которым
+// ключ был зашифрован, вместе с его временными и карантинными копиями: без
+// него шифротекст, переживший где-то ещё (settings.json.corrupt), не
+// расшифровывается.
+func (s *SettingsStore) migrateToV41() {
+	dir := s.DataDir()
+	leftovers, _ := filepath.Glob(filepath.Join(dir, DeviceKeyFile+".*"))
+	for _, p := range append(leftovers, filepath.Join(dir, DeviceKeyFile)) {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			recordNotice("device-key-remove", p, "не удалось удалить секрет устройства: "+err.Error())
+		}
+	}
+}

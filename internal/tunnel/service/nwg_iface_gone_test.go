@@ -89,7 +89,7 @@ func TestReplaceConfigNWG_ListFails_RecordUnchanged(t *testing.T) {
 	before, _ := s.store.Get("awg20")
 
 	f.FailList(errors.New("rci down"))
-	if err := s.ReplaceConfig(context.Background(), "awg20", sampleConf, "renamed", ReplaceOptions{}); err == nil {
+	if err := s.ReplaceConfig(context.Background(), "awg20", sampleConf, "renamed"); err == nil {
 		t.Fatal("ReplaceConfig при непрочитанном списке: want error, got nil")
 	}
 	after, _ := s.store.Get("awg20")

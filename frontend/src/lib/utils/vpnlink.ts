@@ -1,10 +1,10 @@
 import pako from 'pako';
 import { m } from '$lib/i18n';
 
-export type VpnLinkFlavor = 'regular' | 'premium' | 'unknown';
+export type VpnLinkFlavor = 'regular' | 'unknown';
 
 /**
- * Распаковывает vpn:// в JSON-объект без извлечения .conf (для классификации Premium vs клиентская ссылка).
+ * Распаковывает vpn:// в JSON-объект без извлечения .conf (для распознавания ключей облачного портала Amnezia).
  */
 export function decodeVpnLinkPayload(input: string): Record<string, unknown> | null {
 	try {
@@ -47,7 +47,8 @@ function looksLikePremiumVpnPayload(data: Record<string, unknown>): boolean {
 }
 
 /**
- * vpn:// с API другого портала, который текущий экран импорта не проксирует (отличие от каталога премиум-ЛК).
+ * vpn:// с API портала, который панель не принимает: ключ Amnezia Free или
+ * ключ подписки Amnezia Premium.
  */
 export function vpnLinkUnsupportedPortalReason(input: string): string | null {
 	const payload = decodeVpnLinkPayload(input);
@@ -55,20 +56,18 @@ export function vpnLinkUnsupportedPortalReason(input: string): string | null {
 		return null;
 	}
 	const ac = payload.api_config;
-	if (!ac || typeof ac !== 'object' || ac === null) {
-		return null;
+	if (ac && typeof ac === 'object' && (ac as Record<string, unknown>).service_type === 'amnezia-free') {
+		return m.vpnlink_amnezia_free_unsupported();
 	}
-	const st = (ac as Record<string, unknown>).service_type;
-	if (st === 'amnezia-free') {
-		return (
-			m.vpnlink_amnezia_free_unsupported()
-		);
+	if (looksLikePremiumVpnPayload(payload)) {
+		return m.vpnlink_amnezia_premium_unsupported();
 	}
 	return null;
 }
 
 /**
- * Обычная клиентская vpn:// (containers + last_config) vs ключ Premium / API (api_config, auth_data, …).
+ * Обычная клиентская vpn:// (containers + last_config) или нет. Ключи облачного
+ * портала отвергает vpnLinkUnsupportedPortalReason.
  */
 export function classifyVpnLink(input: string): VpnLinkFlavor {
 	const trimmed = input.trim();
@@ -79,13 +78,6 @@ export function classifyVpnLink(input: string): VpnLinkFlavor {
 		decodeVpnLink(trimmed);
 		return 'regular';
 	} catch {
-		const payload = decodeVpnLinkPayload(trimmed);
-		if (!payload) {
-			return 'unknown';
-		}
-		if (looksLikePremiumVpnPayload(payload)) {
-			return 'premium';
-		}
 		return 'unknown';
 	}
 }
