@@ -172,16 +172,21 @@
     // (the same condition that renders the tab) so we never select a tab that
     // isn't there — fakeip-tun implies sing-box installed, but this keeps the
     // selection from racing ahead of systemInfo arriving.
-    const singboxInitializedStore = singboxRouterStore.initialized;
+    //
+    // Gated on settings (primed by reloadSettings() in onMount), not on
+    // `initialized`: that flag is set only by loadAll() of the sing-box tabs,
+    // so on F5 / direct entry the auto-select never fired (F641). Decided once,
+    // on the first settings snapshot — a later switch to fakeip-tun must not
+    // yank the user off the tab they are on.
     const singboxSettings = singboxRouterStore.settings;
     let fakeipAutoSelected = false;
     $effect(() => {
         if (!browser) return;
-        if (!$singboxInitializedStore) return;
+        if (!$singboxSettings) return;
         if (!singboxInstalled) return;
         if (fakeipAutoSelected) return;
-        if ($singboxSettings?.routingMode === 'fakeip-tun') {
-            fakeipAutoSelected = true;
+        fakeipAutoSelected = true;
+        if ($singboxSettings.routingMode === 'fakeip-tun') {
             const explicitTab = new URL(window.location.href).searchParams.get('tab');
             // Явно выбранная любимая вкладка важнее автовыбора.
             if (!explicitTab && savedFavoriteTab === null) {
