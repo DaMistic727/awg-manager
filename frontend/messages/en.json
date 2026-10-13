@@ -3232,6 +3232,8 @@
 	"routing_page_stay": "Stay",
 	"routing_page_leave": "Leave anyway",
 	"routing_page_search_title": "Search NDMS routing rules",
+	"routing_page_favorite_set": "Open this tab first",
+	"routing_page_favorite_unset": "Stop opening this tab first",
 	"routing_geo_autorefresh_on": "Geo file auto-update enabled",
 	"routing_geo_autorefresh_off": "Geo file auto-update disabled",
 	"routing_geo_save_error": "Failed to save settings",

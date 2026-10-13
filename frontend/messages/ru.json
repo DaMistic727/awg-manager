@@ -3328,6 +3328,8 @@
 	"routing_page_stay": "Остаться",
 	"routing_page_leave": "Уйти всё равно",
 	"routing_page_search_title": "Поиск по правилам маршрутизации NDMS",
+	"routing_page_favorite_set": "Открывать эту вкладку первой",
+	"routing_page_favorite_unset": "Не открывать эту вкладку первой",
 	"routing_geo_autorefresh_on": "Автообновление гео-файлов включено",
 	"routing_geo_autorefresh_off": "Автообновление гео-файлов отключено",
 	"routing_geo_save_error": "Ошибка сохранения настроек",

@@ -19,8 +19,8 @@
     import { api } from '$lib/api/client';
     import { notifications } from '$lib/stores/notifications';
     import { PageContainer, PageHeader } from '$lib/components/layout';
-    import { Search } from 'lucide-svelte';
-    import { Tabs, Button, Modal } from '$lib/components/ui';
+    import { Search, Star } from 'lucide-svelte';
+    import { Tabs, Button, IconButton, Modal } from '$lib/components/ui';
     import { RoutingSearch } from '$lib/components/routing';
     import DnsRoutesTab from './DnsRoutesTab.svelte';
     import IpRoutesTab from './IpRoutesTab.svelte';
@@ -34,7 +34,7 @@
     import { modeSwitch, modeSwitchBusy } from '$lib/stores/modeSwitch';
     import GeoDataTab from './GeoDataTab.svelte';
     import { isRoutingSubTabVisible, type RoutingSubTab, type UsageLevel } from '$lib/types/usageLevel';
-    import { usageLevel } from '$lib/stores/settings';
+    import { usageLevel, settings } from '$lib/stores/settings';
 
     // Per-section polling stores — subscribe here so all 8 fetch while
     // the routing page is open. Unsubscribed on destroy to stop polling.
@@ -64,7 +64,38 @@
         unsubRouting?.();
     });
 
-    let activeTab = $state<'hrneo' | 'geodata' | 'dns' | 'ip' | 'policy' | 'clientvpn' | 'singbox' | 'fakeip'>('dns');
+    const ROUTING_TABS = ['hrneo', 'geodata', 'dns', 'ip', 'policy', 'clientvpn', 'singbox', 'fakeip'] as const;
+    type RoutingTab = (typeof ROUTING_TABS)[number];
+
+    // «Любимая» вкладка — открывается первой вместо NDMS. Per-browser
+    // удобство, поэтому localStorage, а не настройки роутера.
+    const FAVORITE_TAB_KEY = 'awgm.routing.favoriteTab';
+
+    function loadFavoriteTab(): RoutingTab | null {
+        try {
+            const v = localStorage.getItem(FAVORITE_TAB_KEY);
+            return ROUTING_TABS.includes(v as RoutingTab) ? (v as RoutingTab) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    // Снимок на старте: решает стартовую вкладку и автовыбор FakeIP;
+    // клики по звезде в этом визите на них уже не влияют.
+    const savedFavoriteTab = loadFavoriteTab();
+    let favoriteTab = $state<RoutingTab | null>(savedFavoriteTab);
+
+    function toggleFavoriteTab(): void {
+        favoriteTab = favoriteTab === activeTab ? null : activeTab;
+        try {
+            if (favoriteTab) localStorage.setItem(FAVORITE_TAB_KEY, favoriteTab);
+            else localStorage.removeItem(FAVORITE_TAB_KEY);
+        } catch {
+            /* quota / private mode — выбор живёт до перезагрузки */
+        }
+    }
+
+    let activeTab = $state<RoutingTab>(savedFavoriteTab ?? 'dns');
 
     // ?policy=Policy1 — прямой переход из настроек sing-box в редактор
     // конкретной политики (#573).
@@ -152,7 +183,8 @@
         if ($singboxSettings?.routingMode === 'fakeip-tun') {
             fakeipAutoSelected = true;
             const explicitTab = new URL(window.location.href).searchParams.get('tab');
-            if (!explicitTab) {
+            // Явно выбранная любимая вкладка важнее автовыбора.
+            if (!explicitTab && savedFavoriteTab === null) {
                 activeTab = 'fakeip';
             }
         }
@@ -344,6 +376,16 @@
         ) {
             return;
         }
+        // Любимую не сбрасываем, пока не пришло то, от чего зависит её
+        // видимость: до загрузки настроек usageLevel = 'advanced' и
+        // expert-вкладки скрыты; FakeIP ниже expert виден только по
+        // routingMode из настроек sing-box. Ждём лишь эти вкладки, чтобы
+        // упавшая загрузка не держала остальные вечно.
+        if (activeTab === savedFavoriteTab && !tabsInclude(items, activeTab)) {
+            const levelGated = activeTab === 'hrneo' || activeTab === 'geodata' || activeTab === 'singbox' || activeTab === 'fakeip';
+            if (levelGated && $settings === null) return;
+            if (activeTab === 'fakeip' && $singboxSettings === null) return;
+        }
 
         if (!tabsInclude(items, activeTab)) {
             const first = items[0];
@@ -383,6 +425,15 @@
                     {m.common_refresh()}
                 {/if}
             </Button>
+            <IconButton
+                size="md"
+                variant={favoriteTab === activeTab ? 'warm' : 'default'}
+                ariaLabel={favoriteTab === activeTab ? m.routing_page_favorite_unset() : m.routing_page_favorite_set()}
+                title={favoriteTab === activeTab ? m.routing_page_favorite_unset() : m.routing_page_favorite_set()}
+                onclick={toggleFavoriteTab}
+            >
+                <Star size={16} strokeWidth={2} fill={favoriteTab === activeTab ? 'currentColor' : 'none'} aria-hidden="true" />
+            </IconButton>
         {/snippet}
     </PageHeader>
 
@@ -391,7 +442,7 @@
         active={activeTab}
         onchange={(id) => requestTab(id)}
         urlParam="tab"
-        defaultTab="dns"
+        defaultTab={favoriteTab ?? 'dns'}
     />
 
     {#if activeTab === 'hrneo'}
