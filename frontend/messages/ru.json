@@ -678,6 +678,7 @@
 	"tunnels_referenced_router_rules": "Используется в правилах sing-box router:",
 	"tunnels_referenced_hint": "Удалите ссылки и попробуйте снова.",
 	"tunnels_referenced_ok": "Понятно",
+	"tunnels_referenced_open": "Открыть",
 	"tunnel_edit_obf_install_url": "Ссылка установки Phobos",
 	"tunnel_edit_obf_install_hint": "Роутер сам скачает пакет с панели. Сертификат панели не проверяется (обычно он самоподписанный); ссылка живёт ограниченное время.",
 	"tunnel_edit_obf_or_conf": "Или конфиг .conf с секцией [instance] / ссылка phobos://",

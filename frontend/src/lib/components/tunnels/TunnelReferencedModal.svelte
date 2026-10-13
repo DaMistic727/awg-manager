@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { Modal, Button } from '$lib/components/ui';
 	import type { TunnelReferencedError } from '$lib/types';
-	import { describeRouterReference } from '$lib/utils/tunnelRefs';
+	import { goto } from '$app/navigation';
+	import { describeRouterReference, type RouterReference } from '$lib/utils/tunnelRefs';
+	import { setMode } from '$lib/components/sb-router/modeStore';
 	import { m } from '$lib/i18n';
 
 	interface Props {
@@ -13,6 +15,20 @@
 	}
 
 	let { open, details, tunnelName, entityLabel, onclose }: Props = $props();
+
+	const PLANE_HREF: Record<RouterReference['plane'], string> = {
+		tproxy: '/routing?tab=singbox',
+		fakeip: '/routing?tab=fakeip'
+	};
+
+	// DNS-серверы и группы TProxy видны только в экспертном режиме; ?mode=
+	// modeStore читает лишь при загрузке, поэтому режим ставим после перехода.
+	async function openPlane(e: MouseEvent, plane: RouterReference['plane']) {
+		e.preventDefault();
+		onclose();
+		await goto(PLANE_HREF[plane]);
+		if (plane === 'tproxy') setMode('expert');
+	}
 </script>
 
 <Modal {open} title={m.tunnels_referenced_title()} size="sm" {onclose}>
@@ -30,12 +46,16 @@
 					<span class="rule-indices">
 						{details.routerRules.map((i) => `#${i}`).join(', ')}
 					</span>
+					<a href={PLANE_HREF.tproxy} onclick={(e) => openPlane(e, 'tproxy')}>{m.tunnels_referenced_open()}</a>
 				</li>
 			{/if}
 			{#if details.routerOther}
 				{#each details.routerOther as loc}
 					{@const ref = describeRouterReference(loc)}
-					<li>{#if ref.known}{ref.text}{:else}<code>{ref.text}</code>{/if}</li>
+					<li>
+						{#if ref.known}{ref.text}{:else}<code>{ref.text}</code>{/if}
+						<a href={PLANE_HREF[ref.plane]} onclick={(e) => openPlane(e, ref.plane)}>{m.tunnels_referenced_open()}</a>
+					</li>
 				{/each}
 			{/if}
 		</ul>

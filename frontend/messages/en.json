@@ -664,6 +664,7 @@
 	"tunnels_referenced_router_rules": "Used in sing-box router rules:",
 	"tunnels_referenced_hint": "Remove the references and try again.",
 	"tunnels_referenced_ok": "Got it",
+	"tunnels_referenced_open": "Open",
 	"tunnel_edit_obf_install_url": "Phobos install link",
 	"tunnel_edit_obf_install_hint": "The router downloads the package from the panel itself. The panel certificate is not verified (it is usually self-signed); the link is valid for a limited time.",
 	"tunnel_edit_obf_or_conf": "Or a .conf config with an [instance] section / phobos:// link",

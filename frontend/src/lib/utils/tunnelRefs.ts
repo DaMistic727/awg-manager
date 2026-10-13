@@ -12,6 +12,8 @@ export interface RouterReference {
 	text: string;
 	/** false when the location did not match a known format (render raw). */
 	known: boolean;
+	/** Слот-владелец ссылки: туда ведёт ссылка из модалки (#1036). */
+	plane: 'tproxy' | 'fakeip';
 }
 
 const PATTERNS: Array<{ re: RegExp; label: (captured: string) => string }> = [
@@ -26,11 +28,18 @@ const PATTERNS: Array<{ re: RegExp; label: (captured: string) => string }> = [
 
 const FAKEIP_PREFIX = '[fakeip] ';
 
+// Без префикса плоскости ссылка из router-слота неотличима от fakeip-ной, и
+// пользователь ищет её не на той вкладке (#1036).
 export function describeRouterReference(loc: string): RouterReference {
-	if (loc.startsWith(FAKEIP_PREFIX)) {
-		const ref = describeRouterReference(loc.slice(FAKEIP_PREFIX.length));
-		return { text: `FakeIP → ${ref.text}`, known: ref.known };
+	const plane = loc.startsWith(FAKEIP_PREFIX) ? 'fakeip' : 'tproxy';
+	const { text, known } = describeLocation(plane === 'fakeip' ? loc.slice(FAKEIP_PREFIX.length) : loc);
+	if (!known) {
+		return { text, known, plane };
 	}
+	return { text: `${plane === 'fakeip' ? 'FakeIP' : 'TProxy'} → ${text}`, known, plane };
+}
+
+function describeLocation(loc: string): { text: string; known: boolean } {
 	if (loc === 'route.final') {
 		return { text: m.tunnel_refs_final(), known: true };
 	}
