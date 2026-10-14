@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -293,5 +294,77 @@ func TestLogRollback(t *testing.T) {
 	want := "warn|peer-subnets|Wireguard1|откат сетей за клиентом не завершён: no such net in peer"
 	if len(spy.entries) != 1 || spy.entries[0] != want {
 		t.Fatalf("журнал = %v", spy.entries)
+	}
+}
+
+// Свой маршрут awgm-peer: без записи пира (двойной сбой отката) стоит на
+// роутере и сеть занимает; маршрут пира с записью второй раз не считается —
+// его сети учтены через запись (F529).
+func TestOccupiedSubnets_OrphanOwnRouteCounts(t *testing.T) {
+	// Ключи настоящей длины: в метке маршрута только первые 8 символов
+	// (peersubnet.RouteComment), и сверка обязана идти по метке.
+	const fullKey = "PEER1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	svc, store, _, fg := newPeerSubnetTestService(t, `[
+		{"network":"192.168.50.0","mask":"255.255.255.0","interface":"Wireguard1","comment":"`+peersubnet.RouteComment(fullKey)+`"},
+		{"network":"192.168.90.0","mask":"255.255.255.0","interface":"Wireguard1","comment":"awgm-peer:GONEGONE"}]`)
+	fg.SetRC("Wireguard1", `{"wireguard":{"peer":[{"key":"`+fullKey+`"}]}}`)
+	_ = store.UpdateManagedServer("Wireguard1", func(sv *storage.ManagedServer) error {
+		sv.Peers = append(sv.Peers, storage.ManagedPeer{PublicKey: fullKey, Description: "branch", RemoteSubnets: []string{"192.168.50.0/24"}})
+		return nil
+	})
+
+	occ, err := svc.OccupiedSubnets(context.Background(), PeerRef{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := labels(occ)
+	if got["192.168.50.0/24"] != "пир «branch» сервера Wireguard1" {
+		t.Fatalf("сеть пира с записью: %q (all %v)", got["192.168.50.0/24"], got)
+	}
+	n := 0
+	for _, o := range occ {
+		if o.Net.String() == "192.168.50.0/24" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("сеть пира с записью учтена %d раз", n)
+	}
+	if _, ok := got["192.168.90.0/24"]; !ok {
+		t.Fatalf("сирота-маршрут не занимает сеть: %v", got)
+	}
+}
+
+// Сирота на сервере операции снимается при правке сетей пира — сеть
+// освобождается (F529, решение владельца 14.10): маршрут наш по метке.
+func TestAddPeer_DropsOrphanOwnRoute(t *testing.T) {
+	orphan := `{"network":"192.168.77.0","mask":"255.255.255.0","interface":"Wireguard1","comment":"awgm-peer:GONEGONE"}`
+	svc, _, poster, fg := newPeerSubnetTestService(t, `[`+orphan+`]`)
+	newSimRouter(t, fg, poster, `[`+orphan+`]`)
+	if _, err := svc.AddPeer(context.Background(), "Wireguard1", AddPeerRequest{Description: "branch", TunnelIP: "10.66.66.2/32",
+		RemoteSubnets: []string{"192.168.77.0/24"}}); err != nil {
+		t.Fatalf("сирота не снята — сеть осталась занятой: %v", err)
+	}
+	// Снятие — до добавления пира: снятие записи (сеть, интерфейс) с меткой
+	// сироты, сверенной свежим чтением.
+	posts := postsJSON(poster)
+	iDrop := indexOf(posts, `"network":"192.168.77.0","no":true`)
+	if iDrop < 0 || iDrop > indexOf(posts, `"preshared-key"`) {
+		t.Fatalf("маршрут-сирота не снят до добавления пира:\n%s", strings.Join(posts, "\n"))
+	}
+}
+
+// Восстановление: пира ещё нет на роутере, его маршрут пережил — для самого
+// этого пира маршрут не «чужая занятая сеть» (F529, ревью).
+func TestOccupiedSnap_WithoutKeepsOwnOrphanRoute(t *testing.T) {
+	const key = "RESTORE0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+	_, n, _ := net.ParseCIDR("192.168.88.0/24")
+	snap := occupiedSnap{{Occupied: peersubnet.Occupied{Net: n, Label: "x"}, iface: "Wireguard1",
+		orphanComment: peersubnet.RouteComment(key)}}
+	if got := snap.without(PeerRef{Iface: "Wireguard1", PubKey: key}); len(got) != 0 {
+		t.Fatalf("собственный маршрут восстанавливаемого пира занят: %v", got)
+	}
+	if got := snap.without(PeerRef{Iface: "Wireguard1", PubKey: "OTHER000AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}); len(got) != 1 {
+		t.Fatalf("сирота чужого пира не занята: %v", got)
 	}
 }

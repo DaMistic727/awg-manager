@@ -167,6 +167,7 @@ func (s *Service) AddPeer(ctx context.Context, id string, req AddPeerRequest) (*
 			return nil, errServerGone(ifaceName)
 		}
 		iface = c
+		snap = s.dropOrphanRoutes(ctx, snap, c)
 		if remote, err = peersubnet.ValidateRemoteSubnets(req.RemoteSubnets, snap.without(PeerRef{Iface: ifaceName})); err != nil {
 			return nil, err
 		}
@@ -353,6 +354,7 @@ func (s *Service) UpdatePeer(ctx context.Context, id, pubkey string, req UpdateP
 			return errServerGone(ifaceName)
 		}
 		iface = c
+		snap = s.dropOrphanRoutes(ctx, snap, c)
 		if remote, err = peersubnet.ValidateRemoteSubnets(*req.RemoteSubnets, snap.without(PeerRef{Iface: ifaceName, PubKey: pubkey})); err != nil {
 			return err
 		}

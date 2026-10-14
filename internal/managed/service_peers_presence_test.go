@@ -124,7 +124,8 @@ func TestAddPeer_KeygenOutsideLock(t *testing.T) {
 }
 
 // M3: статический маршрут через другой интерфейс занимает сеть; маршрут на
-// интерфейсе правимого пира, наш (awgm-peer:) и маршрут по умолчанию — нет.
+// интерфейсе правимого пира и маршрут по умолчанию — нет. Наш (awgm-peer:)
+// без записи пира — сирота, стоит на роутере и сеть занимает (F529).
 func TestOccupiedSubnets_OtherInterfaceStaticRoutes(t *testing.T) {
 	rc := `[{"network":"192.168.80.0","mask":"255.255.255.0","interface":"PPPoE0","auto":true},
 		{"host":"192.168.81.7","interface":"Wireguard0"},
@@ -140,7 +141,10 @@ func TestOccupiedSubnets_OtherInterfaceStaticRoutes(t *testing.T) {
 	if got["192.168.80.0/24"] != "маршрут через PPPoE0" || got["192.168.81.7/32"] != "маршрут через Wireguard0" {
 		t.Fatalf("маршрут через другой интерфейс не занял сеть: %v", got)
 	}
-	for _, cidr := range []string{"192.168.82.0/24", "192.168.83.0/24", "0.0.0.0/0"} {
+	if !strings.Contains(got["192.168.83.0/24"], "без записи пира") {
+		t.Errorf("сирота-маршрут пира не занял сеть: %v", got)
+	}
+	for _, cidr := range []string{"192.168.82.0/24", "0.0.0.0/0"} {
 		if l, ok := got[cidr]; ok {
 			t.Errorf("%s не должен быть занят: %q", cidr, l)
 		}

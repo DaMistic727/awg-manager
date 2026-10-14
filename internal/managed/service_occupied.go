@@ -46,12 +46,51 @@ func peerLabel(desc, pubkey, iface string) string {
 // Прочие WG-интерфейсы — клиентские туннели: их пир держит 0.0.0.0/0 и
 // занял бы всё. allow-ips читаются по серверу свежо (rc мимо кэша), а не из
 // WGServers.List: тот сбой чтения молча превращает в «сетей у пира нет».
+//
+// Вызывается правкой сетей пира на сервере exclude.Iface (системный путь, под
+// блокировкой F508): наши маршруты пиров без записи на этом сервере
+// снимаются (dropOrphanRoutes).
 func (s *Service) OccupiedSubnets(ctx context.Context, exclude PeerRef) ([]peersubnet.Occupied, error) {
-	snap, _, _, err := s.occupiedSnapshot(ctx, "")
+	snap, c, ok, err := s.occupiedSnapshot(ctx, exclude.Iface)
 	if err != nil {
 		return nil, err
 	}
+	if ok {
+		snap = s.dropOrphanRoutes(ctx, snap, c)
+	}
 	return snap.without(exclude), nil
+}
+
+// dropOrphanRoutes снимает с роутера наши маршруты пиров без записи (метка
+// awgm-peer:, пира в хранилище нет — двойной сбой отката) на интерфейсе
+// операции и убирает их из снимка: маршрут наш по метке, а держать сеть
+// занятой без способа снять её из панели нельзя (F529, решение владельца
+// 14.10). Снимается только запись с этой меткой; отказ — сеть остаётся
+// занятой, причина в журнале. Сироты других серверов не трогаются.
+func (s *Service) dropOrphanRoutes(ctx context.Context, snap occupiedSnap, iface query.Confirmed) occupiedSnap {
+	var router peersubnet.Router
+	out := make(occupiedSnap, 0, len(snap))
+	for _, e := range snap {
+		if e.orphanComment == "" || e.iface != iface.Name() {
+			out = append(out, e)
+			continue
+		}
+		if router == nil {
+			r, err := s.peerRouter()
+			if err != nil {
+				out = append(out, e)
+				continue
+			}
+			router = r
+		}
+		if _, err := router.RemoveOwnNetworkRoute(ctx, e.Net, iface, e.orphanComment); err != nil {
+			s.appLog.Warn("peer-subnets", iface.Name(), fmt.Sprintf("маршрут %s (%s) без записи пира не снят: %v", e.Net, e.orphanComment, err))
+			out = append(out, e)
+			continue
+		}
+		s.appLog.Info("peer-subnets", iface.Name(), fmt.Sprintf("снят маршрут %s (%s) без записи пира", e.Net, e.orphanComment))
+	}
+	return out
 }
 
 // occupiedEntry — занятая сеть и её владелец: пир (iface, pubkey) или
@@ -60,6 +99,9 @@ type occupiedEntry struct {
 	peersubnet.Occupied
 	iface, pubkey string
 	route         bool
+	// orphanComment — метка нашего маршрута пира без записи (F529): сеть
+	// занята, а снять маршрут вправе операция на том же интерфейсе.
+	orphanComment string
 }
 
 // occupiedSnap — все занятые сети роутера и записей; исключение правимого
@@ -69,11 +111,18 @@ type occupiedSnap []occupiedEntry
 
 // without — занятые сети без собственных сетей пира ex. Статические маршруты
 // через интерфейс правимого пира не в счёт — чужую запись (N, I) на нём сверка
-// и так не перекрывает и своей не считает.
+// и так не перекрывает и своей не считает. Маршрут «без записи пира» с меткой
+// самого ex — его собственный (восстановление сервера: пира ещё нет на
+// роутере, а его маршрут пережил), сверка его переиспользует (F529).
 func (sn occupiedSnap) without(ex PeerRef) []peersubnet.Occupied {
 	var out []peersubnet.Occupied
+	own := ""
+	if ex.PubKey != "" {
+		own = peersubnet.RouteComment(ex.PubKey)
+	}
 	for _, e := range sn {
-		if e.route && e.iface == ex.Iface || !e.route && e.pubkey != "" && e.iface == ex.Iface && e.pubkey == ex.PubKey {
+		if e.route && e.iface == ex.Iface || !e.route && e.pubkey != "" && e.iface == ex.Iface && e.pubkey == ex.PubKey ||
+			e.orphanComment != "" && e.orphanComment == own && e.iface == ex.Iface {
 			continue
 		}
 		out = append(out, e.Occupied)
@@ -181,14 +230,23 @@ func (s *Service) occupiedSnapshot(ctx context.Context, iface string) (occupiedS
 	// Статические маршруты через другие интерфейсы: сеть за клиентом поверх
 	// такой записи молча дала бы второй маршрут на ту же сеть. Свои (метка
 	// awgm-peer:) учтены ниже, через RemoteSubnets пиров, — второй раз не
-	// считаются. Маршрут по умолчанию пересекался бы с любой сетью —
-	// пропускается.
+	// считаются; но только те, чей пир там действительно учтён: маршрут
+	// пира без записи (двойной сбой отката) стоит на роутере и сеть занимает
+	// (F529). Маршрут по умолчанию пересекался бы с любой сетью — пропускается.
 	routes, err := s.queries.StaticRoutes.Fetch(ctx)
 	if err != nil {
 		return nil, query.Confirmed{}, false, fmt.Errorf("read static routes: %w", err)
 	}
+	var ownRoutes []occupiedEntry
 	for _, e := range routes {
 		if strings.HasPrefix(e.Comment, peersubnet.RouteCommentPrefix) {
+			// В метке — только начало ключа (RouteComment): сверка с пирами
+			// записи — по той же метке, а не по ключу.
+			if n := e.IPv4Net(); n != nil {
+				ownRoutes = append(ownRoutes, occupiedEntry{Occupied: peersubnet.Occupied{Net: n,
+					Label: fmt.Sprintf("маршрут %s через %s без записи пира", e.Comment, e.Interface)},
+					iface: e.Interface, orphanComment: e.Comment})
+			}
 			continue
 		}
 		n := e.IPv4Net()
@@ -209,7 +267,9 @@ func (s *Service) occupiedSnapshot(ctx context.Context, iface string) (occupiedS
 	for _, i := range ifaces {
 		exists[i.ID] = true
 	}
+	counted := map[string]bool{} // iface\x00метка маршрута пиров, чьи сети учтены записью
 	appendStored := func(subnets []string, iface, pub, label string) {
+		counted[iface+"\x00"+peersubnet.RouteComment(pub)] = true
 		for _, sn := range subnets {
 			if _, n, err := net.ParseCIDR(sn); err == nil {
 				out = append(out, occupiedEntry{Occupied: peersubnet.Occupied{Net: n, Label: label}, iface: iface, pubkey: pub})
@@ -240,6 +300,11 @@ func (s *Service) occupiedSnapshot(ctx context.Context, iface string) (occupiedS
 			if stored(serverID, pub) {
 				appendStored(sec.RemoteSubnets, serverID, pub, peerLabel(sec.Description, pub, serverID))
 			}
+		}
+	}
+	for _, r := range ownRoutes {
+		if !counted[r.iface+"\x00"+r.orphanComment] {
+			out = append(out, r)
 		}
 	}
 	c, ok := confirmed[iface]
