@@ -237,7 +237,7 @@ Watch-режим для отладки: `npx vitest`.
 
 ### CI
 
-В GitHub Actions (ubuntu-latest) те же проверки: `go test ./...` для backend и `npm test` для frontend. Локальный `full` перед PR должен проходить так же, как CI.
+В GitHub Actions (ubuntu-latest) на каждый PR: для backend — `gofmt -l` (без `vendor/`), `go vet ./...` и `go test ./... -count=1 -race` в корне и во вложенном модуле `awgmproto` (свой `go.mod`, в `./...` из корня не попадает); для frontend — `npm run check -- --threshold warning` (падает и на предупреждениях), `npm run lint` и `npm test`. Локальный `full` гоняет только `go test ./...` корня без `-race` — остальное перед PR прогоните сами, иначе CI покраснеет там, где локально было зелено.
 
 ## Pull Requests
 
@@ -251,7 +251,7 @@ git rebase origin/develop
 
 - В описании PR кратко опиши что изменилось и зачем.
 - Если добавлял/менял API — убедись, что `swagger.yaml` обновлён и закоммичен.
-- Перед PR прогони тесты: `./scripts/dev/go-test-docker.sh full` (backend) и `npm test` во `frontend/` (если менялся соответствующий код).
+- Перед PR прогони проверки из раздела [CI](#ci): backend — `gofmt -l`, `go vet ./...`, `./scripts/dev/go-test-docker.sh full` (и `-race`, если трогал конкурентный код); frontend — `npm run check`, `npm run lint`, `npm test` во `frontend/` (если менялся соответствующий код).
 - Старайся не смешивать рефакторинг и новую функциональность в одном PR.
 
 ## Conventional Commits
