@@ -115,9 +115,11 @@ export async function removeLanNamesRule(): Promise<void> {
 }
 
 /**
- * IP/geoip rule-set нельзя класть в dns.rules без match_response — sing-box 1.14
- * помечает это как Legacy Address Filter Fields и падает на check.
- * Доменные geosite/inline — ок.
+ * IP/geoip rule-set в dns.rules без match_response бессмыслен: материализация
+ * ставит правилам с rule_set `rule_set_ip_cidr_match_source` (F332), и
+ * IP-часть набора по адресу назначения не матчится вовсе. Фильтр — гигиена
+ * выбора, а не защита от падения: `sing-box check` этот класс не ловит,
+ * проверка живёт в старте DNS-роутера. Доменные geosite/inline — ок.
  */
 export function isDnsAddressFilterRuleSet(
   tag: string,

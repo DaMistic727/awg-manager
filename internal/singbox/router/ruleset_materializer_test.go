@@ -468,6 +468,43 @@ func TestMaterializeConfig_RewritesNestedRuleRefs(t *testing.T) {
 	}
 }
 
+// Материализация не трогает конфиг вызывающего: X-srs-теги — только в
+// результате, у вызывающего прежние inline-теги (F334 п.4), включая
+// вложенные logical-правила и DNS-правила.
+func TestMaterializeConfig_DoesNotMutateCaller(t *testing.T) {
+	dir := t.TempDir()
+	withFakeRuleSetCompiler(t, func(binary string, args []string) (string, string, error) {
+		writeCompiledOutput(t, args, "compiled")
+		return "", "", nil
+	})
+	m := ruleSetMaterializer{configDir: dir, binary: "/opt/bin/sing-box"}
+
+	cfg := NewEmptyConfig()
+	cfg.Route.RuleSet = []RuleSet{{
+		Tag: "geo-telegram", Type: "inline",
+		Rules: []map[string]any{{"domain_suffix": []any{"t.me"}}},
+	}}
+	cfg.Route.Rules = []Rule{
+		{RuleSet: []string{"geo-telegram"}, Action: "route", Outbound: "vpn"},
+		{Type: "logical", Mode: "or", Rules: []Rule{{RuleSet: []string{"geo-telegram"}}, {Protocol: "dns"}},
+			Action: "route", Outbound: "vpn"},
+	}
+	cfg.DNS.Rules = []DNSRule{{RuleSet: []string{"geo-telegram"}, Server: "dns-remote"}}
+
+	if _, err := m.materializeConfig(orchestrator.SlotRouter, cfg); err != nil {
+		t.Fatalf("materializeConfig: %v", err)
+	}
+	if got := cfg.Route.Rules[0].RuleSet[0]; got != "geo-telegram" {
+		t.Fatalf("правило вызывающего переписано: %q", got)
+	}
+	if got := cfg.Route.Rules[1].Rules[0].RuleSet[0]; got != "geo-telegram" {
+		t.Fatalf("вложенное правило вызывающего переписано: %q", got)
+	}
+	if got := cfg.DNS.Rules[0].RuleSet[0]; got != "geo-telegram" {
+		t.Fatalf("DNS-правило вызывающего переписано: %q", got)
+	}
+}
+
 // sing-box 1.14: download_detour и неявный HTTP-клиент deprecated (удаление в
 // 1.16). Хранимая форма — download_detour; в слот уходит http_client{detour}
 // плюс общий клиент rs-download с detour на route.final. Без final — прямой

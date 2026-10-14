@@ -135,6 +135,11 @@ func (m ruleSetMaterializer) materializeConfig(slot orchestrator.Slot, cfg *Rout
 	SanitizeDNSConfig(&out)
 	out.Route = working.Route
 	out.Route.RuleSet = make([]RuleSet, 0, len(working.Route.RuleSet))
+	// Правила — копией (с вложенными logical-подправилами): rewriteRuleSetRefs
+	// пишет в поля правил, и на общем слайсе X-srs-теги оставались бы в
+	// конфиге вызывающего (F334 п.4).
+	out.Route.Rules = cloneRules(working.Route.Rules)
+	out.DNS.Rules = slices.Clone(working.DNS.Rules)
 
 	var inlineSets []RuleSet
 	for _, rs := range working.Route.RuleSet {
@@ -226,6 +231,18 @@ func withoutMDNSDrop(rules []Rule) []Rule {
 //
 // Правила с match_response не трогаем: там ip_cidr набора матчится по
 // ответу (geoip по ответу — рабочий сценарий 1.14+), и флаг его сломал бы.
+// cloneRules — копия правил с вложенными подправилами logical.
+func cloneRules(rules []Rule) []Rule {
+	if rules == nil {
+		return nil
+	}
+	out := slices.Clone(rules)
+	for i := range out {
+		out[i].Rules = cloneRules(out[i].Rules)
+	}
+	return out
+}
+
 func applyDNSRuleSetMatchSource(cfg *RouterConfig) {
 	if len(cfg.DNS.Rules) == 0 {
 		return
