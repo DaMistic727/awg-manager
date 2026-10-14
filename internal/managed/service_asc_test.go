@@ -616,3 +616,24 @@ func TestSetASCParams_ReadErrorIsUnverified(t *testing.T) {
 		t.Fatalf("деревьев rc: %d, want 3 (1 до записи + 2 сверки)", reads)
 	}
 }
+
+// Запись ASC отправлена и отвергнута — ErrASCNotApplied: часть пакета могла
+// примениться, ручка публикует изменение (F601). Отказ валидации — до записи,
+// без этой метки.
+func TestSetASCParams_WriteFailureIsNotApplied(t *testing.T) {
+	svc, _, _ := newCreateTestService(t)
+	server, err := svc.Create(context.Background(), CreateServerRequest{
+		Address: "10.43.0.1", Mask: "255.255.255.0", ListenPort: 52043,
+	})
+	if err != nil {
+		t.Fatalf("seed Create: %v", err)
+	}
+	svc.transport.(*recordingPoster).err = errors.New("rci timeout")
+	raw := json.RawMessage(`{"jc":0,"jmin":0,"jmax":0,"s1":0,"s2":0,"h1":"","h2":"","h3":"","h4":""}`)
+	if err := svc.SetASCParams(context.Background(), server.InterfaceName, raw); !errors.Is(err, ErrASCNotApplied) {
+		t.Fatalf("err = %v, want ErrASCNotApplied", err)
+	}
+	if err := svc.SetASCParams(context.Background(), server.InterfaceName, json.RawMessage(`{}`)); err == nil || errors.Is(err, ErrASCNotApplied) {
+		t.Fatalf("отказ валидации помечен как запись: %v", err)
+	}
+}

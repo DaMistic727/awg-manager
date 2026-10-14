@@ -260,7 +260,7 @@ func (s *Service) applyASCParams(ctx context.Context, iface query.Confirmed, raw
 
 	if isASCDisabledState(obj) {
 		if err := s.rciClearASCParams(ctx, iface); err != nil {
-			return fmt.Errorf("clear ASC params: %w", err)
+			return fmt.Errorf("clear ASC params: %w (%w)", err, ErrASCNotApplied)
 		}
 		if err := s.verifyASCParamsApplied(ctx, ifaceName, raw); err != nil {
 			return err
@@ -284,7 +284,7 @@ func (s *Service) applyASCParams(ctx context.Context, iface query.Confirmed, raw
 		return err
 	}
 	if err := s.rciSetASCParams(ctx, iface, stripped); err != nil {
-		return fmt.Errorf("set ASC params: %w", err)
+		return fmt.Errorf("set ASC params: %w (%w)", err, ErrASCNotApplied)
 	}
 	if err := s.verifyASCParamsApplied(ctx, ifaceName, raw); err != nil {
 		return err
@@ -404,7 +404,7 @@ func (s *Service) verifyASCParamsApplied(ctx context.Context, ifaceName string, 
 		return fmt.Errorf("%w: %v", ErrASCUnverified, readErr)
 	}
 	if !ascReadbackMatches(want, wantDisabled, actual) {
-		return fmt.Errorf("ASC params were not applied by router: want=%v got=%v", want, actual)
+		return fmt.Errorf("%w: want=%v got=%v", ErrASCNotApplied, want, actual)
 	}
 	return nil
 }
@@ -413,6 +413,13 @@ func (s *Service) verifyASCParamsApplied(ctx context.Context, ifaceName string, 
 // результат для сверки не удалось. Это не отказ записи: Create не откатывает
 // сервер, restore не падает, правка публикует изменение (R44).
 var ErrASCUnverified = errors.New("роутер принял запись ASC, но прочитать результат для проверки не удалось")
+
+// ErrASCNotApplied — запись ASC отправлена, но не применилась целиком:
+// роутер отверг её или сверка показала другие значения. NDMS применяет пакет
+// поэлементно, а при обрыве транспорта запись могла пройти без ответа — часть
+// могла примениться, и правка публикует изменение, хоть и отвечает отказом
+// (F601). Отказы ДО записи этим не помечаются.
+var ErrASCNotApplied = errors.New("ASC params were not applied by router")
 
 // ascUnverified — err несёт ErrASCUnverified: шаг не провален (R44), в журнал
 // уходит предупреждение. Прочие ошибки — false, решает вызывающий.

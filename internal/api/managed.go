@@ -969,6 +969,12 @@ func (h *ManagedServerHandler) ASC(w http.ResponseWriter, r *http.Request, id st
 			return
 		}
 		if err := h.svc.SetASCParams(r.Context(), id, params); err != nil {
+			if errors.Is(err, managed.ErrASCNotApplied) {
+				// Запись принята, сверка не сошлась: часть могла примениться —
+				// фронту есть что перечитать (F601).
+				h.svc.InvalidateCache(id)
+				h.publishServerUpdated()
+			}
 			if !errors.Is(err, managed.ErrASCUnverified) {
 				response.Error(w, err.Error(), "SET_ASC_FAILED")
 				return

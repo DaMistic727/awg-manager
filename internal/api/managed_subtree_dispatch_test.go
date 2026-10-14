@@ -301,6 +301,28 @@ func TestManagedASC_UnverifiedPublishes(t *testing.T) {
 	}
 }
 
+// F601: запись принята, сверка не сошлась — отказ SET_ASC_FAILED, но часть
+// могла примениться: кэш сброшен и инвалидация опубликована. Прочие отказы
+// (до записи) — без публикации.
+func TestManagedASC_NotAppliedPublishes(t *testing.T) {
+	svc := &recManagedSvc{err: fmt.Errorf("%w: want=a got=b", managed.ErrASCNotApplied)}
+	h, p := newManagedSubtreeHarness(t, svc)
+	rr := perform(h.Subtree, http.MethodPut, "/api/managed-servers/Wireguard3/asc", `{}`)
+	if body := decodeJSONBody(t, rr); body["code"] != "SET_ASC_FAILED" {
+		t.Fatalf("code=%v (тело=%s)", body["code"], rr.Body.String())
+	}
+	if pub := p.invalidated(); !reflect.DeepEqual(pub, []string{"servers/managed-mutation"}) {
+		t.Fatalf("публикации = %v, ожидалась одна инвалидация servers", pub)
+	}
+
+	svc2 := &recManagedSvc{err: errors.New("validation")}
+	h2, p2 := newManagedSubtreeHarness(t, svc2)
+	perform(h2.Subtree, http.MethodPut, "/api/managed-servers/Wireguard3/asc", `{}`)
+	if pub := p2.invalidated(); len(pub) != 0 {
+		t.Fatalf("отказ до записи опубликован: %v", pub)
+	}
+}
+
 // L4: Create записал ASC, но сверка не прочиталась — сервер создан и
 // сохранён, поэтому публикация есть, но ответ не успех: ASC_UNVERIFIED с
 // сообщением, что сервер создан.
