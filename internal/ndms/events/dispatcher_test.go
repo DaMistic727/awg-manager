@@ -576,3 +576,45 @@ func TestDispatcher_BatchesDuringList_CoalesceIntoOneRerun(t *testing.T) {
 		t.Fatalf("списков всего %d, want 2 (в полёте + один повтор)", n)
 	}
 }
+
+// Stop дожидается горутины списка и отменяет её контекст: после возврата Stop
+// ни запроса, ни слушателя существования (F602).
+func TestDispatcher_StopJoinsListGoroutine(t *testing.T) {
+	fg := query.NewFakeGetter()
+	fg.SetJSON(ifaceListPath, sampleList)
+	bg := &listBlockingGetter{Getter: fg, entered: make(chan struct{}, 1)}
+	q := query.NewQueries(query.Deps{Getter: bg, Logger: query.NopLogger(), IsOS5: func() bool { return true }})
+	if _, err := q.Interfaces.List(context.Background()); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+	bg.gate = make(chan struct{})
+
+	d := NewDispatcher(q, NopLogger())
+	listed := listedBarrier(d)
+	d.Start()
+	d.Enqueue(Event{Type: EventIfCreated, ID: "Wireguard1"})
+	select {
+	case <-bg.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("список пачки не начат")
+	}
+
+	stopped := make(chan struct{})
+	go func() { d.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop вернулся, пока список ещё идёт")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(bg.gate)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop не дождался списка")
+	}
+	select {
+	case p := <-listed:
+		t.Fatalf("слушатель вызван после Stop (publish=%v)", p)
+	default:
+	}
+}

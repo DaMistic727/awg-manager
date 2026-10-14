@@ -50,6 +50,11 @@ type Dispatcher struct {
 	listing      bool
 	again        bool
 	againPublish bool
+	// listCtx отменяется в Stop, listWG — горутина списка: Stop дожидается
+	// её, а не бросает посреди ReconcileDirty (F602).
+	listCtx    context.Context
+	listCancel context.CancelFunc
+	listWG     sync.WaitGroup
 
 	notify    chan struct{} // cap=1, non-blocking wake
 	stopCh    chan struct{}
@@ -79,12 +84,15 @@ func NewDispatcher(q *query.Queries, log Logger) *Dispatcher {
 	if log == nil {
 		log = NopLogger()
 	}
+	listCtx, listCancel := context.WithCancel(context.Background())
 	return &Dispatcher{
-		queries: q,
-		log:     log,
-		notify:  make(chan struct{}, 1),
-		stopCh:  make(chan struct{}),
-		doneCh:  make(chan struct{}),
+		queries:    q,
+		log:        log,
+		notify:     make(chan struct{}, 1),
+		stopCh:     make(chan struct{}),
+		doneCh:     make(chan struct{}),
+		listCtx:    listCtx,
+		listCancel: listCancel,
 	}
 }
 
@@ -132,6 +140,10 @@ func (d *Dispatcher) Stop() {
 	if d.started.Load() {
 		<-d.doneCh
 	}
+	// Воркер вышел — новых списков никто не закажет; текущий отменяем и
+	// дожидаемся (F602).
+	d.listCancel()
+	d.listWG.Wait()
 }
 
 // maxQueuedEvents — предел очереди: spool пишет хуки с загрузки, а воркер
@@ -219,7 +231,11 @@ func (d *Dispatcher) scheduleList(publish bool) {
 		return
 	}
 	d.listing = true
-	go d.listExistence(publish)
+	d.listWG.Add(1)
+	go func() {
+		defer d.listWG.Done()
+		d.listExistence(publish)
+	}()
 }
 
 // listExistence — список пачки хуков существования, затем слушатель; пока
@@ -230,11 +246,17 @@ func (d *Dispatcher) scheduleList(publish bool) {
 func (d *Dispatcher) listExistence(publish bool) {
 	for {
 		if d.queries != nil && d.queries.Interfaces != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			ctx, cancel := context.WithTimeout(d.listCtx, 30*time.Second)
 			if err := d.queries.Interfaces.ReconcileDirty(ctx); err != nil {
 				d.log.Warnf("reconcile dirty interfaces: %v", err)
 			}
 			cancel()
+		}
+		if d.listCtx.Err() != nil { // Stop: ни слушателя, ни нового круга
+			d.listMu.Lock()
+			d.listing = false
+			d.listMu.Unlock()
+			return
 		}
 		if p := d.onExisting.Load(); p != nil {
 			(*p)(publish)
