@@ -273,13 +273,16 @@ func ApplyDiff(subID string, current []string, parsed []vlink.ParsedOutbound) Di
 
 // sameServer сравнивает метаданные двух членов: тот же ли это сервер.
 // Первым аргументом идёт сохранённая запись, вторым — кандидат из выдачи:
-// TransportKey сравнивается, только когда он есть у сохранённой (у записей,
-// сделанных до появления поля, оно пустое — см. MemberInfo).
+// TransportKey и RealmID сравниваются, только когда они есть у сохранённой (у
+// записей, сделанных до появления полей, они пустые — см. MemberInfo).
 func sameServer(stored, candidate MemberInfo) bool {
 	if stored.Protocol != candidate.Protocol || stored.Server != candidate.Server ||
 		stored.Port != candidate.Port || stored.SNI != candidate.SNI ||
 		stored.Transport != candidate.Transport {
 		return false
+	}
+	if stored.RealmID != "" && stored.RealmID != candidate.RealmID {
+		return false // разные узлы за одним реле (F660)
 	}
 	return stored.TransportKey == "" || stored.TransportKey == candidate.TransportKey
 }

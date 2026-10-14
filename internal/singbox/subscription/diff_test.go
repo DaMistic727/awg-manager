@@ -323,3 +323,25 @@ func TestApplyDiff_RealmIDDistinguishesMembers(t *testing.T) {
 		t.Errorf("одиночный realm-узел сменил тег")
 	}
 }
+
+// F660: узлы за одним реле hysteria2 — разные серверы для переассоциации
+// сирот и переноса исключений; запись без RealmID (до появления поля)
+// сравнивается грубо, как с TransportKey. RealmID берётся из блока realm.
+func TestSameServer_RealmID(t *testing.T) {
+	a := toMemberInfo("a", mkParsedRealm("a"))
+	b := toMemberInfo("b", mkParsedRealm("b"))
+	if a.RealmID != "a" {
+		t.Fatalf("RealmID не извлечён: %+v", a)
+	}
+	if sameServer(a, b) {
+		t.Error("узлы с разным realm_id признаны одним сервером")
+	}
+	if !sameServer(a, toMemberInfo("a2", mkParsedRealm("a"))) {
+		t.Error("тот же узел не признан")
+	}
+	legacy := a
+	legacy.RealmID = ""
+	if !sameServer(legacy, b) {
+		t.Error("запись без RealmID обязана сравниваться грубо")
+	}
+}

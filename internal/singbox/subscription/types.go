@@ -20,6 +20,11 @@ type MemberInfo struct {
 	// (issue #625). Empty on records written before this field existed —
 	// consumers must fall back to the coarse comparison for those.
 	TransportKey string `json:"transportKey,omitempty"`
+	// RealmID — realm_id узла hysteria2 за реле (приходит только из xray-JSON
+	// подписки): Server/Port у таких узлов — адрес реле, общий для всех за ним,
+	// и различаются они только этим (F366, F660). Пусто у узлов без реле и у
+	// записей до появления поля — для них сравнение грубое, как с TransportKey.
+	RealmID string `json:"realmId,omitempty"`
 }
 
 // SubscriptionMode picks which sing-box outbound type wraps the

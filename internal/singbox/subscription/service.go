@@ -1033,6 +1033,9 @@ func toMemberInfo(tag string, p vlink.ParsedOutbound) MemberInfo {
 		}
 	}
 	mi.TransportKey = transportKey(ob)
+	if r, ok := ob["realm"].(map[string]any); ok {
+		mi.RealmID, _ = r["realm_id"].(string)
+	}
 	if tls, ok := ob["tls"].(map[string]any); ok {
 		if serverName, ok := tls["server_name"].(string); ok {
 			mi.SNI = strings.TrimSpace(serverName)
