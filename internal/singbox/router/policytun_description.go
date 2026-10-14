@@ -124,6 +124,36 @@ func policyTunOwnDescriptions(st *storage.OpkgTunState) []string {
 	return out
 }
 
+// ModeOwningDescription — режим роутера, чьё NDMS-описание desc: штатные
+// описания обоих режимов и, для policy-tun, применённое или ожидаемое из
+// записи владения st (его переименовывают). Поставщик занятости пула OpkgTun
+// по нему признаёт запись NDMS держателем режима, а не анонимом: строгий пин
+// режима тогда узнаёт СВОЙ остаток записи без живого скана, и номер не
+// уезжает, обрывая permit'ы политик (F319).
+//
+// Пользовательское описание признаётся ТОЛЬКО на номере записи владения num ==
+// st.Index: оно не уникально (см. шапку файла), и совпавшая с ним запись
+// AWG-туннеля на другом номере стала бы держателем режима — конфликтом,
+// после которого пул не отдал бы номер и самому туннелю.
+func ModeOwningDescription(num int, desc string, st *storage.OpkgTunState) (string, bool) {
+	switch desc {
+	case "":
+		return "", false
+	case fakeIPTunDescription:
+		return stateFakeIPTun, true
+	case policyTunDescription:
+		return statePolicyTun, true
+	}
+	if st != nil && st.Mode == statePolicyTun && st.Index == num {
+		for _, d := range policyTunOwnDescriptions(st) {
+			if d == desc {
+				return statePolicyTun, true
+			}
+		}
+	}
+	return "", false
+}
+
 // persistPolicyTunDescription пишет описания записи владения, если они
 // отличаются от записанных: повтор после сбоя NDMS не трогает флеш.
 func (s *ServiceImpl) persistPolicyTunDescription(st *storage.OpkgTunState, applied, pending string) error {

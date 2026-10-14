@@ -104,7 +104,7 @@ func (a *app) setupTunnels() {
 	// Шесть владельцев пула OpkgTun собираются ЗДЕСЬ и раздаются готовыми:
 	// состав общий на всех, кто выдаёт номера (opkgTunOwners).
 	opkgIndices := &routerOpkgTunIndexAdapter{store: a.ndmsQueries.Interfaces}
-	a.opkgTunOwners = newOpkgTunOwners(ndmsSource(opkgIndices), liveSource(opkgIndices),
+	a.opkgTunOwners = newOpkgTunOwners(ndmsSource(opkgIndices, a.settingsStore), liveSource(opkgIndices),
 		a.awgStore, a.settingsStore, a.proxyStore)
 	// Пул собирается ОДИН на процесс и тем же составом: второй экземпляр
 	// означал бы две очереди на выбор, то есть отсутствие атомарности.

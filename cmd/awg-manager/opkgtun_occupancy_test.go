@@ -48,7 +48,7 @@ func readHolders(t *testing.T, s opkgtun.Source) opkgtun.Taken {
 func TestNDMSHolders(t *testing.T) {
 	a := newAdapterWith(t, ifaceListJSON, func() ([]int, error) { return nil, nil })
 
-	got := readHolders(t, opkgtun.Source{Name: "ndms", Read: ndmsHolders(a)})
+	got := readHolders(t, opkgtun.Source{Name: "ndms", Read: ndmsHolders(a, nil)})
 	if _, busy := got[10]; !busy {
 		t.Fatalf("OpkgTun10 из NDMS должен считаться занятым, got %v", got)
 	}
@@ -99,7 +99,7 @@ func TestOpkgTunIndicesFailsClosedOnSysError(t *testing.T) {
 func TestOccupancyUnionsSysAndNDMS(t *testing.T) {
 	a := newAdapterWith(t, ifaceListJSON, func() ([]int, error) { return []int{3}, nil })
 	pool := opkgtun.NewPool(16,
-		opkgtun.Source{Name: "записи NDMS", Read: ndmsHolders(a)},
+		opkgtun.Source{Name: "записи NDMS", Read: ndmsHolders(a, nil)},
 		opkgtun.Source{Name: "живые интерфейсы", Read: liveHolders(a)},
 	)
 
@@ -165,5 +165,45 @@ func TestTunnelHoldersFailClosedOnUnreadableRecord(t *testing.T) {
 	got, err := src.Read(context.Background())
 	if err == nil {
 		t.Fatalf("нечитаемая запись отдана как «занятых нет»: %v", got)
+	}
+}
+
+// Остаток записи режима (устройство снято, запись NDMS жива) — держатель
+// режима, а не аноним: строгий пин режима его принимает, чужую — нет (F319).
+func TestNDMSHoldersRecognizeRouterMode(t *testing.T) {
+	const list = `{
+  "OpkgTun5": {"id":"OpkgTun5","interface-name":"OpkgTun5","type":"OpkgTun","state":"error","description":"Мой VPN"},
+  "OpkgTun6": {"id":"OpkgTun6","interface-name":"OpkgTun6","type":"OpkgTun","state":"error","description":"Мой VPN"},
+  "OpkgTun7": {"id":"OpkgTun7","interface-name":"OpkgTun7","type":"OpkgTun","state":"error","description":"awgm fakeip-tun"}
+}`
+	settings := storage.NewSettingsStore(t.TempDir())
+	if _, err := settings.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := settings.SetOpkgTunState(&storage.OpkgTunState{Mode: "policy-tun", Index: 5, Description: "Мой VPN"}); err != nil {
+		t.Fatalf("SetOpkgTunState: %v", err)
+	}
+	a := newAdapterWith(t, list, func() ([]int, error) { return nil, nil })
+	src := opkgtun.Source{Name: "ndms", Read: ndmsHolders(a, settings)}
+
+	pool := opkgtun.NewPool(16, src)
+	self := opkgtun.RouterModeHolder("policy-tun")
+	for n, want := range map[int]bool{5: true, 6: false, 7: true} {
+		res, err := pool.Reserve(context.Background(), opkgtun.WantPinnedStrict(self, n))
+		if got := err == nil && slices.Equal(res.Numbers(), []int{n}); got != want {
+			t.Errorf("строгий пин режима на OpkgTun%d: выдан=%v, ждали %v (err=%v, holders=%v)",
+				n, got, want, err, readHolders(t, src))
+		}
+		if err == nil {
+			res.Close()
+		}
+	}
+
+	// Живое устройство на том же номере — аноним: признание записи его не
+	// перекрывает, строгий пин по-прежнему отказывает.
+	live := newAdapterWith(t, list, func() ([]int, error) { return []int{5}, nil })
+	withLive := opkgtun.NewPool(16, opkgtun.Source{Name: "ndms", Read: ndmsHolders(live, settings)}, liveSource(live))
+	if res, err := withLive.Reserve(context.Background(), opkgtun.WantPinnedStrict(self, 5)); err == nil && slices.Equal(res.Numbers(), []int{5}) {
+		t.Error("строгий пин отдал номер с живым устройством")
 	}
 }

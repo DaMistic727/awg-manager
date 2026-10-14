@@ -7,6 +7,7 @@ import (
 
 	"github.com/hoaxisr/awg-manager/internal/opkgtun"
 	"github.com/hoaxisr/awg-manager/internal/proxyrt/instancestore"
+	"github.com/hoaxisr/awg-manager/internal/singbox/router"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/sysinfo"
 )
@@ -51,8 +52,8 @@ func newOpkgTunOwners(ndms, live opkgtun.Source, awg *storage.AWGTunnelStore,
 }
 
 // ndmsSource и liveSource — прод-половины, зависящие от роутера.
-func ndmsSource(a *routerOpkgTunIndexAdapter) opkgtun.Source {
-	return opkgtun.Source{Name: "записи NDMS", Read: ndmsHolders(a)}
+func ndmsSource(a *routerOpkgTunIndexAdapter, settings *storage.SettingsStore) opkgtun.Source {
+	return opkgtun.Source{Name: "записи NDMS", Read: ndmsHolders(a, settings)}
 }
 
 func liveSource(a *routerOpkgTunIndexAdapter) opkgtun.Source {
@@ -173,11 +174,22 @@ func proxyHolders(store *instancestore.Store) func(context.Context) (opkgtun.Tak
 // памяти — при пропущенной инвалидации список вернётся неполным БЕЗ ошибки, то
 // есть недосчёт занятых молча. Единственная альтернатива — RCI на каждую
 // выдачу номера под общим семафором; остаточный риск принят.
-func ndmsHolders(a *routerOpkgTunIndexAdapter) func(context.Context) (opkgtun.Taken, error) {
+//
+// Запись с описанием режима роутера — держатель этого режима, а не аноним
+// (F319): иначе строгий пин режима не отличал свой остаток записи (устройство
+// снято, запись NDMS пережила его) от чужой и уезжал на новый номер, обрывая
+// permit'ы политик. settings nil — без этого признания (тесты).
+func ndmsHolders(a *routerOpkgTunIndexAdapter, settings *storage.SettingsStore) func(context.Context) (opkgtun.Taken, error) {
 	return func(ctx context.Context) (opkgtun.Taken, error) {
 		all, err := a.store.List(ctx)
 		if err != nil {
 			return nil, err
+		}
+		var st *storage.OpkgTunState
+		if settings != nil {
+			if st, err = settings.OpkgTunStateSnapshot(); err != nil {
+				return nil, err
+			}
 		}
 		out := opkgtun.Taken{}
 		for _, i := range all {
@@ -194,6 +206,10 @@ func ndmsHolders(a *routerOpkgTunIndexAdapter) func(context.Context) (opkgtun.Ta
 			// которую занятость видит, а спрашивающий нет.
 			num, ok := sysinfo.ExtractInterfaceNumber(strings.ToLower(i.ID))
 			if !ok {
+				continue
+			}
+			if mode, ok := router.ModeOwningDescription(num, i.Description, st); ok {
+				out[num] = opkgtun.RouterModeHolder(mode)
 				continue
 			}
 			name := "запись NDMS " + i.ID

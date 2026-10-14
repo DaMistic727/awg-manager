@@ -756,3 +756,33 @@ func TestPolicyTunDisable_HoldsRenamedInterface(t *testing.T) {
 		t.Errorf("PolicyTun persist = %+v, want удержание index 0 с Description=Awgmanager", st)
 	}
 }
+
+// Признание записи NDMS держателем режима (F319): штатные описания — на любом
+// номере, пользовательское — только на номере записи владения и только у
+// policy-tun.
+func TestModeOwningDescription(t *testing.T) {
+	custom := &storage.OpkgTunState{Mode: statePolicyTun, Index: 5, Description: "Мой VPN", PendingDescription: "Новый"}
+	fake := &storage.OpkgTunState{Mode: stateFakeIPTun, Index: 5, Description: "Мой VPN"}
+	cases := []struct {
+		name     string
+		num      int
+		desc     string
+		st       *storage.OpkgTunState
+		wantMode string
+	}{
+		{"пусто", 5, "", custom, ""},
+		{"штатное fakeip", 9, fakeIPTunDescription, nil, stateFakeIPTun},
+		{"штатное policy-tun", 9, policyTunDescription, nil, statePolicyTun},
+		{"применённое на своём номере", 5, "Мой VPN", custom, statePolicyTun},
+		{"ожидаемое на своём номере", 5, "Новый", custom, statePolicyTun},
+		{"пользовательское на чужом номере", 6, "Мой VPN", custom, ""},
+		{"пользовательское у fakeip", 5, "Мой VPN", fake, ""},
+		{"постороннее", 5, "vdsina30", custom, ""},
+	}
+	for _, c := range cases {
+		mode, ok := ModeOwningDescription(c.num, c.desc, c.st)
+		if mode != c.wantMode || ok != (c.wantMode != "") {
+			t.Errorf("%s: got (%q, %v), want %q", c.name, mode, ok, c.wantMode)
+		}
+	}
+}

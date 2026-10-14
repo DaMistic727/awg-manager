@@ -299,7 +299,7 @@ func TestOwnerKeyIsPinnedForEverySource(t *testing.T) {
 		{
 			name:  "записи NDMS",
 			setup: func(*occEnv) {},
-			src:   func(*occEnv) opkgtun.Source { return opkgtun.Source{Name: "n", Read: ndmsHolders(adapter)} },
+			src:   func(*occEnv) opkgtun.Source { return opkgtun.Source{Name: "n", Read: ndmsHolders(adapter, nil)} },
 			idx:   10,
 			self:  opkgtun.RouterModeHolder(storage.OpkgTunModeFakeIP),
 			want:  relAnon,
