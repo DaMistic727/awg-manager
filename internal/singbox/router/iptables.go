@@ -107,7 +107,8 @@ func SetDataDir(dir string) {
 
 // DataDirPaths — текущие пути, производные от каталога данных. Существует для
 // проверки того, что SetDataDir не забыл ни одного: список файлов растёт, а
-// забытый путь молча уводит запись в боевой каталог.
+// забытый путь молча уводит запись в боевой каталог. Полноту самого списка
+// сторожит TestDataDirPaths_CoversEveryDataDirDecl — по объявлениям (F263).
 func DataDirPaths() map[string]string {
 	return map[string]string{
 		"netfilterRulesPath":        netfilterRulesPath,
