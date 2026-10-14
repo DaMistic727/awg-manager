@@ -777,6 +777,11 @@ func TestLocal_GetLogsContainsSeesWhatItReturns(t *testing.T) {
 	if got, _, _ := l.GetLogs(ctx, mcpsrv.LogsQuery{Bucket: "app", Lines: 10, Contains: "203.0.113.7", Raw: true}); len(got) != 1 {
 		t.Fatalf("raw contains = %d entries, want 1", len(got))
 	}
+	// The mask's own stars are visible text: the raw prefilter must not
+	// reject a needle that only exists after masking (MC11).
+	if got, _, _ := l.GetLogs(ctx, mcpsrv.LogsQuery{Bucket: "app", Lines: 10, Contains: "20*"}); len(got) != 1 {
+		t.Fatalf("contains on masked stars = %d entries, want 1", len(got))
+	}
 }
 
 func TestLocal_GetLogsOldestFirstAndKeepsNewest(t *testing.T) {

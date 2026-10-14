@@ -337,11 +337,20 @@ func (l *Local) GetLogs(_ context.Context, q mcpsrv.LogsQuery) ([]mcpsrv.LogEntr
 	// matched against the unmasked text, it would let a caller without
 	// raw (a read-only key is refused raw) learn a masked address by
 	// probing which filters return lines.
+	//
+	// The mask only swaps runes for '*' in place (same rune count, same
+	// positions), so for a needle without '*' a masked match implies a raw
+	// match: a cheap raw strings.Contains rejects most lines before the
+	// four sanitizer regexes run (MC11).
+	rawPrefilter := !strings.Contains(contains, "*")
 	matched := make([]*logging.LogEntry, 0, len(entries))
 	for i := len(entries) - 1; i >= 0; i-- {
 		e := &entries[i]
 		if contains != "" {
 			msg := e.Message
+			if rawPrefilter && !strings.Contains(strings.ToLower(msg), contains) {
+				continue
+			}
 			if !q.Raw {
 				msg = logging.SanitizeLogText(msg)
 			}
