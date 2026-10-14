@@ -188,11 +188,13 @@ export function createPollingStore<T>(
             await doFetch();
         },
         invalidate() {
+            // Идущий запрос — повтор после него, есть подписчики или нет:
+            // иначе его свежий lastFetchedAt стёр бы пометку «устарело» (F663).
+            if (inflight) {
+                refetchAfterInflight = true;
+                return;
+            }
             if (subCount > 0) {
-                if (inflight) {
-                    refetchAfterInflight = true;
-                    return;
-                }
                 void doFetch();
             } else {
                 state.update(s => {

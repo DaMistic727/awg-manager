@@ -129,6 +129,25 @@ describe('createPollingStore', () => {
         u();
     });
 
+    it('invalidate() after the last unsubscribe during a fetch still refetches', async () => {
+        let resolveFirst!: (v: { v: number }) => void;
+        const fetcher = vi
+            .fn()
+            .mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)))
+            .mockResolvedValue({ v: 2 });
+        const s = createPollingStore<{ v: number }>(fetcher, { staleTime: 10_000, pollInterval: 0 });
+
+        const u = s.subscribe(() => {});
+        await vi.advanceTimersByTimeAsync(0);
+        u();
+        s.invalidate();
+        resolveFirst({ v: 1 });
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(s.peek().data).toEqual({ v: 2 });
+    });
+
     it('applyMutationResponse updates value without fetch', async () => {
         const fetcher = vi.fn().mockResolvedValue({ v: 1 });
         const s = createPollingStore<{ v: number }>(fetcher, { staleTime: 10_000, pollInterval: 10_000 });
