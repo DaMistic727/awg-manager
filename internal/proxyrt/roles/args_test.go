@@ -180,6 +180,11 @@ func TestValidateRejects(t *testing.T) {
 		{"сервер без raw-половины NDMS", "rawNdmsIface", WdttServerConfig{
 			Listen: "0.0.0.0:56000", NatMode: "full", RelayMode: "wg",
 			WgIface: "opkgtun17", NdmsIface: "OpkgTun17"}},
+		// F654: -config-dir — куда бинарь пишет passwords.json.
+		{"configDir относительный", "configDir", WdttServerConfig{
+			Listen: "0.0.0.0:56000", NatMode: "full", RelayMode: "wg", ConfigDir: "wdtt/server"}},
+		{"configDir с ..", "configDir", WdttServerConfig{
+			Listen: "0.0.0.0:56000", NatMode: "full", RelayMode: "wg", ConfigDir: "/opt/etc/awg-manager/../../etc"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -3,6 +3,8 @@ package roles
 import (
 	"fmt"
 	"net"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -239,6 +241,12 @@ func (c WdttServerConfig) StaticNATList() []string {
 func (c WdttServerConfig) Validate() error {
 	if strings.TrimSpace(c.Listen) == "" {
 		return fmt.Errorf("не задан listen сервера")
+	}
+	// ConfigDir уходит в бинарь как -config-dir, туда пишется passwords.json:
+	// только абсолютный путь без «..» (F654). Пусто — дефолт под каталогом
+	// данных (normalize).
+	if d := strings.TrimSpace(c.ConfigDir); d != "" && (!filepath.IsAbs(d) || slices.Contains(strings.Split(d, "/"), "..")) {
+		return fmt.Errorf("configDir %q: нужен абсолютный путь без «..»", d)
 	}
 	if err := c.validatePorts(); err != nil {
 		return err
