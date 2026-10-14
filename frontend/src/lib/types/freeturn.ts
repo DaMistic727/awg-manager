@@ -181,6 +181,8 @@ export interface FreeTurnAllowlistStatus {
 	enabled: boolean;
 	clientsFile?: string;
 	clients: FreeTurnAllowlistEntry[];
+	/** Файл выданных ссылок не прочитан: пустая ссылка значит «неизвестно» (F372). */
+	linksUnreadable?: boolean;
 }
 
 export interface FreeTurnAllowlistAddResult extends FreeTurnAllowlistStatus {

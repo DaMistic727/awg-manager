@@ -2447,6 +2447,7 @@
 	"proxy_allowlist_disabled_restart": "The list is disabled — restart the server for the check to stop",
 	"proxy_allowlist_disable": "Disable the list",
 	"proxy_allowlist_link": "Link",
+	"proxy_allowlist_links_unreadable": "The issued-links file could not be read: client links are not shown, and a client with a link cannot be added until the file is fixed or deleted (the path is in the log). Entries can still be viewed and removed.",
 	"proxy_allowlist_entries": "Entries: {count}",
 	"proxy_allowlist_check_off": "check is disabled — entries take effect once it is enabled",
 	"proxy_allowlist_empty": "The list is empty — with the check enabled the server will let no one in",

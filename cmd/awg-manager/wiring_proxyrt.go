@@ -968,7 +968,8 @@ func (a *app) wireProxyrt() {
 			}),
 		},
 	})
-	allowlist := ftlink.New(ftlink.Deps{Records: records, Mutator: mutator, DataDir: a.dataDir})
+	allowlist := ftlink.New(ftlink.Deps{Records: records, Mutator: mutator, DataDir: a.dataDir,
+		Warn: func(msg string) { journal.Warn("allowlist", "freeturn", msg) }})
 	subs := proxysub.New(proxysub.Deps{Records: records, Mutator: mutator,
 		Fetch: wdttlink.DecodeLink})
 	captchaSvc := captcha.New(captcha.Deps{

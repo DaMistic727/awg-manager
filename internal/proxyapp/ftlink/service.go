@@ -27,6 +27,9 @@ type Deps struct {
 	// DataDir — каталог данных awg-manager: в нём заводится файл списка,
 	// когда пользователь включает проверку впервые.
 	DataDir string
+	// Warn — app-журнал (необязателен): исходы, которые не роняют операцию,
+	// но терять их молча нельзя.
+	Warn func(msg string)
 }
 
 // Service — список разрешённых Client ID и ручка разбора ссылки.
@@ -80,25 +83,31 @@ func (s *Service) List(key string) (AllowlistStatus, error) {
 		}
 		st.Clients = allowlistEntriesFromFile(data)
 	}
-	if err := s.fillLinks(rec.ID, st.Clients); err != nil {
-		return st, err
-	}
+	s.fillLinks(rec.ID, &st)
 	return st, nil
 }
 
-// fillLinks подставляет записям выданные ссылки (#919). Отказ чтения — отказ
-// списка: молча показать список без ссылок значит соврать «ссылки нет», и
-// владелец полезет перевыпускать её на ровном месте.
-func (s *Service) fillLinks(serverID string, clients []AllowlistEntry) error {
-	if len(clients) == 0 {
-		return nil
-	}
+// fillLinks подставляет записям выданные ссылки (#919). Отказ чтения файла
+// ссылок не роняет список (F372): ссылка — производное поле для показа, а без
+// списка нельзя ни посмотреть состав, ни удалить запись. Чтобы пустой Link не
+// читался как «ссылки нет», ответ несёт LinksUnreadable.
+// Файл читается и при пустом списке: битый файл закрывает и добавление со
+// ссылкой (setClientLink не пишет поверх, чтобы не стереть ссылки остальных),
+// и пользователь должен это видеть, даже когда записей уже нет.
+func (s *Service) fillLinks(serverID string, st *AllowlistStatus) {
 	links, err := s.storedLinks(serverID)
 	if err != nil {
-		return err
+		st.LinksUnreadable = true
+		s.warn("файл ссылок абонентов не прочитан, список показан без ссылок: " + err.Error())
+		return
 	}
-	applyLinks(clients, links)
-	return nil
+	applyLinks(st.Clients, links)
+}
+
+func (s *Service) warn(msg string) {
+	if s.deps.Warn != nil {
+		s.deps.Warn(msg)
+	}
 }
 
 // storedLinks — выданные ссылки сервера. Без каталога данных файла нет и быть
@@ -176,11 +185,9 @@ func (s *Service) Add(ctx context.Context, key, clientID, comment, link string) 
 	}
 	// Ответ — тот же состав, что отдаёт List: фронт рисует список по нему, и
 	// без ссылок у только что внесённого абонента не было бы кнопки «Ссылка»
-	// до перезагрузки страницы. Чтение здесь уже ничего не ломает: список
-	// записан, и отказ чтения — честный отказ ручки.
-	if err := s.fillLinks(rec.ID, st.Clients); err != nil {
-		return AddAllowlistResult{}, err
-	}
+	// до перезагрузки страницы. Абонент уже внесён — отказ чтения ссылок не
+	// отказ ручки, а та же пометка, что у List.
+	s.fillLinks(rec.ID, &st)
 	return AddAllowlistResult{AllowlistStatus: st, NeedsRestart: needsRestart}, nil
 }
 
@@ -206,7 +213,12 @@ func (s *Service) Remove(key, clientID string) error {
 	if strings.TrimSpace(s.deps.DataDir) == "" {
 		return nil
 	}
-	return dropClientLink(instancestore.FreeTurnLinksPath(s.deps.DataDir, rec.ID), clientID)
+	// Абонент уже вычеркнут: отказ снятия ссылки — не отказ удаления, иначе
+	// пользователь читает «не удалось» про удалённую запись (F372).
+	if err := dropClientLink(instancestore.FreeTurnLinksPath(s.deps.DataDir, rec.ID), clientID); err != nil {
+		s.warn("абонент " + clientID + " удалён, но его ссылка не снята: " + err.Error())
+	}
+	return nil
 }
 
 // Disable выключает проверку Client ID: путь снимается с конфига роли.

@@ -213,3 +213,56 @@ func TestAllowlist_ListWithoutLinksFile(t *testing.T) {
 		t.Fatalf("записи=%+v", st.Clients)
 	}
 }
+
+// F372: битый файл ссылок не прячет список — состав видно и запись можно
+// удалить; пустой Link помечен как «неизвестно», а не «ссылки нет».
+func TestAllowlist_BrokenLinksFileDegradesList(t *testing.T) {
+	s, _, _, dataDir := newAllowlistService(t, ftServerRecord(""))
+	var warned []string
+	s.deps.Warn = func(msg string) { warned = append(warned, msg) }
+	if _, err := s.Add(context.Background(), ftServerKey, upperClientID, "Телефон Ивана", someLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(instancestore.FreeTurnLinksPath(dataDir, "default"), []byte("{битый"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := s.List(ftServerKey)
+	if err != nil {
+		t.Fatalf("List на битом файле ссылок: %v", err)
+	}
+	if len(st.Clients) != 1 || !st.LinksUnreadable || st.Clients[0].Link != "" {
+		t.Fatalf("ждали список с пометкой LinksUnreadable: %+v", st)
+	}
+	if len(warned) == 0 {
+		t.Fatal("отказ чтения ссылок не попал в журнал")
+	}
+
+	// Абонент вычёркивается; отказ снятия ссылки — не отказ удаления, но в
+	// журнал он уходит.
+	warned = nil
+	if err := s.Remove(ftServerKey, upperClientID); err != nil {
+		t.Fatalf("Remove ответил отказом за удалённую запись: %v", err)
+	}
+	if len(warned) == 0 {
+		t.Fatal("отказ снятия ссылки при Remove не попал в журнал")
+	}
+	// Записей нет, а файл всё ещё битый — пометка остаётся: добавление со
+	// ссылкой закрыто, пользователь должен это видеть.
+	st, err = s.List(ftServerKey)
+	if err != nil || len(st.Clients) != 0 || !st.LinksUnreadable {
+		t.Fatalf("после Remove: %+v, %v", st, err)
+	}
+}
+
+// Целый файл ссылок — пометки нет.
+func TestAllowlist_ReadableLinksNoFlag(t *testing.T) {
+	s, _, _, _ := newAllowlistService(t, ftServerRecord(""))
+	if _, err := s.Add(context.Background(), ftServerKey, upperClientID, "", someLink); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.List(ftServerKey)
+	if err != nil || st.LinksUnreadable {
+		t.Fatalf("st=%+v err=%v", st, err)
+	}
+}

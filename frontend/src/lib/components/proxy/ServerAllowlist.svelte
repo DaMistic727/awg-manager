@@ -36,6 +36,7 @@
 	let entries = $state<FreeTurnAllowlistEntry[]>([]);
 	let enabled = $state(false);
 	let clientsFile = $state('');
+	let linksUnreadable = $state(false);
 	let loadedFor = $state('');
 	let disableOpen = $state(false);
 
@@ -117,6 +118,7 @@
 			entries = st.clients ?? [];
 			enabled = st.enabled;
 			clientsFile = st.clientsFile ?? '';
+			linksUnreadable = st.linksUnreadable ?? false;
 		} catch (e) {
 			notifications.error(errText(e));
 		}
@@ -172,6 +174,7 @@
 					entries = add.clients ?? [];
 					enabled = add.enabled;
 					clientsFile = add.clientsFile ?? '';
+					linksUnreadable = add.linksUnreadable ?? false;
 					// TS-11 — только когда бэкенд сказал, что перезапуск нужен
 					// (включение списка). На добавление записи тоста нет: сервер
 					// подхватывает её сам (оговорка TS-11).
@@ -261,6 +264,9 @@
 		{/if}
 	</div>
 
+	{#if linksUnreadable}
+		<p class="links-warn">{m.proxy_allowlist_links_unreadable()}</p>
+	{/if}
 	{#if entries.length}
 		<ul class="list">
 			{#each entries as entry (entry.clientId)}
@@ -411,4 +417,9 @@
 		color: var(--color-text-secondary);
 	}
 
+	.links-warn {
+		margin: 0 0 0.5rem;
+		font-size: 0.8125rem;
+		color: var(--color-warning);
+	}
 </style>

@@ -26,6 +26,9 @@ type AllowlistStatus struct {
 	Enabled     bool             `json:"enabled"`
 	ClientsFile string           `json:"clientsFile,omitempty"`
 	Clients     []AllowlistEntry `json:"clients"`
+	// LinksUnreadable — файл выданных ссылок не прочитался: список показан, но
+	// пустой Link у записей значит «неизвестно», а не «ссылки нет» (F372).
+	LinksUnreadable bool `json:"linksUnreadable,omitempty"`
 }
 
 // AddAllowlistResult is returned after adding a client to the allowlist.
