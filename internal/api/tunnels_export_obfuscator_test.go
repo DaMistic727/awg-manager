@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -79,5 +80,23 @@ func TestExportAll_EntryNamesSafeAndDistinct(t *testing.T) {
 	}
 	if len(seen) != 3 {
 		t.Fatalf("записей %d, want 3: %v", len(seen), seen)
+	}
+}
+
+// F662: «Экспорт всех» несёт [instance] обфусцированного туннеля, как и
+// одиночный экспорт.
+func TestExportAll_AppendsInstanceSection(t *testing.T) {
+	h, store := newTunnelsUpdateHarness(t, &stubTunnelSvc{})
+	seedObfTunnel(t, store)
+	rec := httptest.NewRecorder()
+	h.ExportAll(rec, httptest.NewRequest(http.MethodGet, "/tunnels/export-all", nil))
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil || len(zr.File) != 1 {
+		t.Fatalf("zip: %v files=%d", err, len(zr.File))
+	}
+	f, _ := zr.File[0].Open()
+	body, _ := io.ReadAll(f)
+	if !strings.Contains(string(body), "[instance]") || !strings.Contains(string(body), "target = 1.2.3.4:51824") {
+		t.Fatalf("архив без [instance]:\n%s", body)
 	}
 }

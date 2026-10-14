@@ -758,16 +758,24 @@ func (h *TunnelsHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content := config.GenerateForExport(stored)
-	if stored.Obfuscator != nil {
-		content += "\n" + obfuscator.RenderInstance(stored.Obfuscator)
-	}
+	content := exportContent(stored)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	// Имя — свободная строка: кавычку экранирует, кириллицу кодирует по
 	// RFC 2231 (filename*=utf-8'') stdlib, а не склейка строк (F646).
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment",
 		map[string]string{"filename": exportFileName(stored.Name)}))
 	w.Write([]byte(content))
+}
+
+// exportContent — .conf экспорта: у обфусцированного туннеля с секцией
+// [instance], без неё Endpoint указывает на локальный порт релея без
+// параметров обфускатора. Одна функция на оба экспорта (F662).
+func exportContent(stored *storage.AWGTunnel) string {
+	content := config.GenerateForExport(stored)
+	if stored.Obfuscator != nil {
+		content += "\n" + obfuscator.RenderInstance(stored.Obfuscator)
+	}
+	return content
 }
 
 // exportFileName — имя файла .conf из имени туннеля без разделителей пути:
@@ -815,7 +823,7 @@ func (h *TunnelsHandler) ExportAll(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		content := config.GenerateForExport(stored)
+		content := exportContent(stored)
 		entry := exportFileName(stored.Name)
 		for i := 2; used[entry]; i++ {
 			entry = exportFileName(fmt.Sprintf("%s (%d)", stored.Name, i))
