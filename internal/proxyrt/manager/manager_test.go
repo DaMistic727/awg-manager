@@ -2321,3 +2321,36 @@ func TestCreateReturnsNumbersWhenListenFails(t *testing.T) {
 		t.Fatalf("номер не вернулся после отказа порта: %+v", c)
 	}
 }
+
+// F138: новый wdtt-клиент без device-id получает значение по умолчанию и
+// хранит его в записи; присланный id не трогается; конфиг вызывающего не
+// мутируется.
+func TestCreateFillsDefaultDeviceID(t *testing.T) {
+	for _, tc := range []struct {
+		name, sent, want string
+	}{
+		{"пустой — подставляется", "", "Ultramarina"},
+		{"присланный — сохраняется", "my-phone", "my-phone"},
+		{"одни пробелы — подставляется", "  ", "Ultramarina"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			seedState(t, e)
+			boot(t, e)
+			e.m.deps.DefaultDeviceID = func(context.Context) string { return "Ultramarina" }
+			cfg := &roles.WdttClientConfig{Mode: "raw", Peer: "1.1.1.1:1", Password: "pw", VKHashes: "h", DeviceID: tc.sent}
+			rec := instancestore.Record{ID: "dv", Kind: instancestore.KindWdttClient, Name: "D", Enabled: true, WdttClient: cfg}
+			if err := e.m.Create(context.Background(), rec); err != nil {
+				t.Fatal(err)
+			}
+			st, _ := e.st.Load()
+			c, _ := st.Records[0].WdttClientConfig()
+			if c.DeviceID != tc.want {
+				t.Fatalf("deviceId = %q, want %q", c.DeviceID, tc.want)
+			}
+			if cfg.DeviceID != tc.sent {
+				t.Fatalf("конфиг вызывающего изменён: %q", cfg.DeviceID)
+			}
+		})
+	}
+}

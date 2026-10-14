@@ -123,6 +123,13 @@ type Deps struct {
 	// писателя конфига (план 3), то есть наша (Щ1): без этого создание
 	// raw-клиента и сервера через API невозможно.
 	OpkgTunPool *opkgtun.Pool
+	// DefaultDeviceID — device-id нового wdtt-клиента, если его не прислали
+	// (F138): у форка умолчание «unknown», и два роутера на одном сервере с
+	// одним паролем делили одну запись устройства — адрес и ключи пира.
+	// Значение пишется в запись при создании, поэтому поздняя смена источника
+	// (hostname роутера) запись на сервере не переназначает. Существующие
+	// клиенты через Create не идут и не меняются. nil — шаг пропущен.
+	DefaultDeviceID func(ctx context.Context) string
 	// AllocListen выдаёт клиенту локальный listen. current — адрес, который уже
 	// стоит в записи: годный (в пуле и ничей) возвращается как есть, негодный
 	// заменяется свободным. Занятость считается без собственной записи
@@ -830,6 +837,12 @@ func (m *Manager) Create(ctx context.Context, rec instancestore.Record) error {
 	// корень коллизии имён файлов: «ft x» и «ft_x» дают один путь данных.
 	if err := control.ValidateInstance(rec.ID); err != nil {
 		return err
+	}
+	if rec.Kind == instancestore.KindWdttClient && rec.WdttClient != nil &&
+		strings.TrimSpace(rec.WdttClient.DeviceID) == "" && m.deps.DefaultDeviceID != nil {
+		cfg := *rec.WdttClient // копия: конфиг вызывающего не трогаем
+		cfg.DeviceID = m.deps.DefaultDeviceID(ctx)
+		rec.WdttClient = &cfg
 	}
 	// Намерение по listen — ДО аллокатора, как на пути правки: переезд это
 	// когда аллокатор ОТВЕРГ желаемый порт. У создания без явного listen

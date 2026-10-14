@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -928,9 +931,12 @@ func (a *app) wireProxyrt() {
 			func() error { return instancestore.ClearCleanupPending(store) }),
 		EnsureBinaries: proxyEnsureBinaries(installSvc, journal),
 		OpkgTunPool:    a.opkgPool,
-		AllocListen:    allocListen,
-		ReleasePins:    proxyReleasePins(a.shutdownCtx, portAlloc, book, journal),
-		WaitDisabled:   proxyWaitDisabled(states),
+		DefaultDeviceID: func(ctx context.Context) string {
+			return proxyDefaultDeviceID(ctx, a.ndmsTransportClient)
+		},
+		AllocListen:  allocListen,
+		ReleasePins:  proxyReleasePins(a.shutdownCtx, portAlloc, book, journal),
+		WaitDisabled: proxyWaitDisabled(states),
 		RecordsChanged: func(reason string) {
 			a.eventBus.PublishInvalidated(events.ResourceProxyInstances, reason)
 		},
@@ -1331,3 +1337,30 @@ func obfFlavor(name install.Subsystem) (string, bool) {
 	}
 	return "", false
 }
+
+// proxyDefaultDeviceID — device-id нового wdtt-клиента (F138): hostname
+// роутера (`show system`), понятный админу сервера; пустой, нечитаемый или с
+// символами, которым не место в аргументе форка, — случайный. Hostname
+// Keenetic по умолчанию одинаков ли у одной модели — не проверено; случайный
+// хвост не добавляем по решению владельца 14.10.
+func proxyDefaultDeviceID(ctx context.Context, g interface {
+	Get(ctx context.Context, path string, dst any) error
+}) string {
+	// Поле косметическое: зависший RCI не должен держать создание клиента
+	// (семафор до 60 с + HTTP 30 с) — по таймауту уходим в случайный id.
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	var sys struct {
+		Hostname string `json:"hostname"`
+	}
+	if g.Get(ctx, "/show/system", &sys) == nil {
+		if h := strings.TrimSpace(sys.Hostname); deviceIDRe.MatchString(h) {
+			return h
+		}
+	}
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+var deviceIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
