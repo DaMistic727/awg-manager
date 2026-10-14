@@ -63,6 +63,12 @@ type Process struct {
 	// FATAL (stand 2026-06-17). The pinned build closes first and survives
 	// SIGHUP (stand 2026-09-25). Nil = always SIGHUP. Set by Operator.
 	ReloadNeedsRestart func() bool
+	// StartedLineExpected — печатает ли уровень журнала sing-box строку
+	// готовности «sing-box started» (INFO). nil — печатает. Читается при
+	// спавне и фиксируется в поколении (уровень из настроек; если записанный
+	// конфиг с ними разошёлся, Reload лишь подождёт до таймаута). При
+	// warn/error строки нет — Reload шлёт SIGHUP сразу, как до правки (F637).
+	StartedLineExpected func() bool
 
 	// startMu serialises Start and Stop so concurrent callers (watchdog tick
 	// + manual UI Restart) cannot both pass the IsRunning gate and spawn two
@@ -152,6 +158,12 @@ type processGen struct {
 	// ссылки его никто не гасил.
 	pid    int
 	reaped chan struct{}
+	// started закрывается, когда хвост stderr видит «sing-box started»: до
+	// этой строки SIGHUP процесс убивает (F637, см. waitStarted).
+	// expectStarted — печатает ли её уровень журнала, с которым поколение
+	// заспавнено (INFO и ниже); при warn/error ждать нечего.
+	started       chan struct{}
+	expectStarted bool
 	// proc — сигналы ребёнку идут через него: os.Process.Signal
 	// синхронизирован с wait4 и после пожатия отвечает ErrProcessDone, а не
 	// бьёт по переиспользованному pid, как голый kill(pid).
@@ -289,7 +301,9 @@ func (p *Process) startLocked() (spawned bool, err error) {
 	_ = errF.Close()
 
 	// Fresh spawn: tail from the start of the (just-truncated) log files.
-	tailCtx, tailCancel := p.startTails(false)
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	tailCtx, tailCancel := p.startTails(false, func() { startedOnce.Do(func() { close(started) }) })
 
 	if err := p.writePID(cmd.Process.Pid); err != nil {
 		// Ребёнок только что заспавнен и ещё ничего не делал — гасим сразу
@@ -304,7 +318,8 @@ func (p *Process) startLocked() (spawned bool, err error) {
 	// stopLocked взводит его перед сигналом. Монитор ниже замыкается на
 	// СВОЮ генерацию, поэтому следующий Start (создающий новую) не может
 	// ретроактивно очистить флаг предшественника (FIX-C).
-	gen := &processGen{pid: cmd.Process.Pid, reaped: make(chan struct{}), proc: cmd.Process}
+	gen := &processGen{pid: cmd.Process.Pid, reaped: make(chan struct{}), proc: cmd.Process,
+		started: started, expectStarted: p.StartedLineExpected == nil || p.StartedLineExpected()}
 	p.curGen = gen
 	errCh := make(chan error, 1)
 	go func() {
@@ -411,7 +426,7 @@ func (p *Process) AttachIfRunning() (bool, int) {
 		_ = p.stopLocked()
 		return false, 0
 	}
-	p.startTails(true)
+	p.startTails(true, nil)
 	p.attached = true
 	return true, pid
 }
@@ -460,7 +475,8 @@ func (p *Process) effectiveLogDir() string {
 // fromEnd=true — адопция (не реиграть историю). done закрывается только
 // когда ОБЕ tail-горутины вернулись (WaitGroup), так что join в
 // startLocked не может проскочить, пока одна из них ещё дочитывает файл.
-func (p *Process) startTails(fromEnd bool) (context.Context, context.CancelFunc) {
+// onStarted (может быть nil) зовётся на строке готовности «sing-box started».
+func (p *Process) startTails(fromEnd bool, onStarted func()) (context.Context, context.CancelFunc) {
 	logDir := p.effectiveLogDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -477,6 +493,9 @@ func (p *Process) startTails(fromEnd bool) (context.Context, context.CancelFunc)
 	go func() {
 		defer wg.Done()
 		tailFile(ctx, filepath.Join(logDir, procErrLogName), fromEnd, func(l string) {
+			if onStarted != nil && strings.Contains(l, "sing-box started") {
+				onStarted()
+			}
 			if p.OnStderrLine != nil {
 				p.OnStderrLine(l)
 			}
@@ -662,6 +681,11 @@ func isZombie(pid int) bool {
 	return i >= 0 && i+2 < len(b) && b[i+2] == 'Z'
 }
 
+// reloadReadyWait — сколько Reload ждёт строки готовности свежего поколения
+// перед SIGHUP: столько же, сколько проект вообще даёт загрузке движка
+// (maxSingboxBootWait). Var — шов для тестов.
+var reloadReadyWait = maxSingboxBootWait
+
 // Reload acquires startMu for the entire stop+start sequence so callers
 // to concurrent Start/Stop see a single atomic transition. Worst-case
 // hold time is ~3.65s on the SIGHUP-failure path (3s SIGTERM poll +
@@ -669,11 +693,34 @@ func isZombie(pid int) bool {
 // a stuck Reload may appear hung — that is the price of "Reload is
 // atomic w.r.t. concurrent restarts".
 //
+// Before taking startMu, Reload waits (up to reloadReadyWait) for a fresh
+// generation to print «sing-box started» — see waitStarted (F637); the
+// call may therefore take as long as a boot, while the lock is not held.
+//
 // Reload sends SIGHUP; on failure, falls back to stop + start.
 // The lock-free helpers startLocked/stopLocked are used internally to
 // avoid a reentrant-lock deadlock.
 func (p *Process) Reload() error {
-	p.startMu.Lock()
+	for {
+		g, died := p.waitStarted()
+		p.startMu.Lock()
+		if p.curGen != g {
+			// Пока ждали без лока, появилось новое поколение (параллельный
+			// Reload ушёл в stop+start): ждём уже его готовности.
+			p.startMu.Unlock()
+			continue
+		}
+		if died {
+			// Процесс умер, пока мы ждали: пользовательский Stop или краш.
+			// Поднимать его здесь — значит отменить более поздний Stop.
+			// Цена: после краша движок поднимает сторож на своём тике (с
+			// учётом backoff), а не этот Reload сразу; конфиг на диске уже
+			// новый — его и возьмёт.
+			p.startMu.Unlock()
+			return nil
+		}
+		break
+	}
 	defer p.startMu.Unlock()
 
 	pid, err := p.readPID()
@@ -705,6 +752,49 @@ func (p *Process) Reload() error {
 		return err
 	}
 	return nil
+}
+
+// waitStarted — до SIGHUP свежее поколение должно дойти до «sing-box
+// started» (F637). Раньше SIGHUP убивает процесс двумя путями: до
+// signal.Notify в run() — действием по умолчанию («signal: hangup»), а во
+// время create()/Start — отменой старта (выход со статусом 1).
+//
+// Ждём ДО захвата startMu: держать его минуту значило бы блокировать Stop,
+// Close и старт. По таймауту не перезапускаем, а шлём SIGHUP как раньше —
+// перезапуск убил бы честно грузящийся движок, и поток reload'ов не дал бы
+// ему подняться никогда. Ждём только поколение, у которого строку обещал
+// уровень журнала НА МОМЕНТ СПАВНА (expectStarted); принятый извне процесс
+// (AttachIfRunning) curGen не заводит — он давно работает.
+// Возвращает поколение, которое ждали (Reload сверит его с curGen под
+// локом), и died — умерло ли оно за время ожидания.
+func (p *Process) waitStarted() (g *processGen, died bool) {
+	p.startMu.Lock()
+	g = p.curGen
+	p.startMu.Unlock()
+	if g == nil || !g.expectStarted {
+		return g, false
+	}
+	// Уже умершее ДО вызова поколение (curGen после Stop/краша не
+	// обнуляется) и уже готовое — без ожидания и без died: проверки
+	// по отдельности, иначе select между двумя закрытыми каналами выбирал бы
+	// исход случайно. died — ровно «умерло, пока ждали».
+	select {
+	case <-g.reaped:
+		return g, false
+	default:
+	}
+	select {
+	case <-g.started:
+		return g, false
+	default:
+	}
+	select {
+	case <-g.started:
+	case <-g.reaped:
+		return g, true
+	case <-time.After(reloadReadyWait):
+	}
+	return g, false
 }
 
 // IsRunning checks if the PID in file is alive.

@@ -447,6 +447,14 @@ func NewOperator(d OperatorDeps) *Operator {
 	op.proc.ReloadNeedsRestart = func() bool {
 		return op.orch != nil && op.orch.CurrentHasTun() && !op.TunHotReload()
 	}
+	// Строку готовности «sing-box started» (F637) печатает только INFO и ниже.
+	op.proc.StartedLineExpected = func() bool {
+		switch op.desiredSingboxLogLevel() {
+		case "trace", "debug", "info":
+			return true
+		}
+		return false
+	}
 	return op
 }
 

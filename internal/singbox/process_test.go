@@ -746,3 +746,192 @@ func TestAttachIfRunning_KillsPositionalFdProcess(t *testing.T) {
 		}
 	})
 }
+
+// F637: SIGHUP в первые секунды после старта приходит раньше, чем sing-box
+// ставит обработчик сигнала, и убивает процесс («signal: hangup»). Reload
+// свежего поколения ждёт строки готовности и только потом шлёт SIGHUP.
+func TestProcess_ReloadWaitsForStartedBeforeSIGHUP(t *testing.T) {
+	dir := t.TempDir()
+	p := NewProcess("/bin/sh", "/dev/null", filepath.Join(dir, "sing-box.pid"))
+	t.Cleanup(p.Close)
+	p.logDir = dir
+	p.matchBinaryFn = func(int) bool { return true }
+	var startedAt time.Time
+	var hupAt atomic.Int64
+	p.signalFn = func(pid int, sig syscall.Signal) error {
+		if sig == syscall.SIGHUP {
+			hupAt.Store(time.Now().UnixNano())
+			return nil
+		}
+		return syscall.Kill(pid, sig)
+	}
+	p.startCmd = func(bin string, args ...string) (*exec.Cmd, error) {
+		// Строка готовности позже окна старта Start (~500 мс): иначе она
+		// успела бы прийти ещё внутри Start, и тест ничего не проверял бы.
+		return exec.Command("/bin/sh", "-c", `sleep 1.5; echo "INFO[0000] sing-box started (1.50s)" >&2; exec sleep 3`), nil
+	}
+	startedAt = time.Now()
+	if err := p.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if hupAt.Load() == 0 {
+		t.Fatal("SIGHUP не отправлен")
+	}
+	if d := time.Duration(hupAt.Load() - startedAt.UnixNano()); d < 1400*time.Millisecond {
+		t.Fatalf("SIGHUP через %v после старта — раньше строки готовности", d)
+	}
+}
+
+// F637: процесс так и не стал готов за отведённое время — SIGHUP уходит,
+// как до правки; перезапуска нет (он убил бы честно грузящийся движок).
+func TestProcess_ReloadSIGHUPsAfterReadyTimeout(t *testing.T) {
+	old := reloadReadyWait
+	reloadReadyWait = 200 * time.Millisecond
+	t.Cleanup(func() { reloadReadyWait = old })
+
+	dir := t.TempDir()
+	p := NewProcess("/bin/sh", "/dev/null", filepath.Join(dir, "sing-box.pid"))
+	t.Cleanup(p.Close)
+	p.logDir = dir
+	p.matchBinaryFn = func(int) bool { return true }
+	var sawHUP atomic.Bool
+	p.signalFn = func(pid int, sig syscall.Signal) error {
+		if sig == syscall.SIGHUP {
+			sawHUP.Store(true)
+			return nil
+		}
+		return syscall.Kill(pid, sig)
+	}
+	var spawns atomic.Int32
+	p.startCmd = func(bin string, args ...string) (*exec.Cmd, error) {
+		spawns.Add(1)
+		return exec.Command("/bin/sh", "-c", "exec sleep 3"), nil
+	}
+	if err := p.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if !sawHUP.Load() || spawns.Load() != 1 {
+		t.Fatalf("ждали SIGHUP без перезапуска: hup=%v spawns=%d", sawHUP.Load(), spawns.Load())
+	}
+}
+
+// F637: ожидание держится на уровне журнала, с которым поколение заспавнено,
+// а не на текущих настройках: поколение без строки готовности (warn) не
+// ждут и после переключения уровня на info.
+func TestProcess_ReloadUsesSpawnTimeLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	p := NewProcess("/bin/sh", "/dev/null", filepath.Join(dir, "sing-box.pid"))
+	t.Cleanup(p.Close)
+	p.logDir = dir
+	p.matchBinaryFn = func(int) bool { return true }
+	var level atomic.Value
+	level.Store("warn")
+	p.StartedLineExpected = func() bool { return level.Load() == "info" }
+	p.signalFn = func(pid int, sig syscall.Signal) error {
+		if sig == syscall.SIGHUP {
+			return nil
+		}
+		return syscall.Kill(pid, sig)
+	}
+	p.startCmd = func(bin string, args ...string) (*exec.Cmd, error) {
+		return exec.Command("/bin/sh", "-c", "exec sleep 3"), nil
+	}
+	if err := p.Start(); err != nil {
+		t.Fatal(err)
+	}
+	level.Store("info") // пользователь переключил уровень; процесс — прежний
+	start := time.Now()
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("Reload ждал строку, которой у этого поколения не будет: %v", d)
+	}
+}
+
+// F637: при уровне журнала выше info строки готовности не будет — Reload не
+// ждёт её до таймаута, а шлёт SIGHUP сразу, как до правки.
+func TestProcess_ReloadNoWaitWhenStartedLineSuppressed(t *testing.T) {
+	dir := t.TempDir()
+	p := NewProcess("/bin/sh", "/dev/null", filepath.Join(dir, "sing-box.pid"))
+	t.Cleanup(p.Close)
+	p.logDir = dir
+	p.matchBinaryFn = func(int) bool { return true }
+	p.StartedLineExpected = func() bool { return false }
+	var sawHUP atomic.Bool
+	p.signalFn = func(pid int, sig syscall.Signal) error {
+		if sig == syscall.SIGHUP {
+			sawHUP.Store(true)
+			return nil
+		}
+		return syscall.Kill(pid, sig)
+	}
+	var spawns atomic.Int32
+	p.startCmd = func(bin string, args ...string) (*exec.Cmd, error) {
+		spawns.Add(1)
+		return exec.Command("/bin/sh", "-c", "exec sleep 3"), nil
+	}
+	if err := p.Start(); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+	if !sawHUP.Load() || spawns.Load() != 1 {
+		t.Fatalf("ждали немедленный SIGHUP без перезапуска: hup=%v spawns=%d", sawHUP.Load(), spawns.Load())
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("Reload ждал %v", d)
+	}
+}
+
+// F637: процесс умер, пока Reload ждал готовности (пользовательский Stop):
+// Reload не поднимает его заново — более поздний Stop выигрывает.
+func TestProcess_ReloadDoesNotRestartAfterStopDuringWait(t *testing.T) {
+	dir := t.TempDir()
+	p := NewProcess("/bin/sh", "/dev/null", filepath.Join(dir, "sing-box.pid"))
+	t.Cleanup(p.Close)
+	p.logDir = dir
+	p.matchBinaryFn = func(int) bool { return true }
+	p.signalFn = func(pid int, sig syscall.Signal) error {
+		if sig == syscall.SIGHUP {
+			return nil
+		}
+		return syscall.Kill(pid, sig)
+	}
+	var spawns atomic.Int32
+	p.startCmd = func(bin string, args ...string) (*exec.Cmd, error) {
+		spawns.Add(1)
+		return exec.Command("/bin/sh", "-c", "exec sleep 5"), nil // готовым не станет
+	}
+	if err := p.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- p.Reload() }()
+	time.Sleep(200 * time.Millisecond) // Reload ждёт готовности
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Reload: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Reload не вернулся после Stop")
+	}
+	if got := spawns.Load(); got != 1 {
+		t.Fatalf("Reload поднял движок после Stop: spawns=%d", got)
+	}
+	if running, _ := p.IsRunning(); running {
+		t.Fatal("движок работает после Stop")
+	}
+}
