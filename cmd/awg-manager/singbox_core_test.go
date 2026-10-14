@@ -50,6 +50,10 @@ func TestBuildSingboxCore_UsesDataDirSingbox(t *testing.T) {
 	if got := core.op.ConfigDir(); !strings.HasPrefix(got, sb) {
 		t.Fatalf("config.d = %q, ждали внутри %q", got, sb)
 	}
+	// F305: и бинарь — установка из песочницы не переписывает боевой.
+	if got := core.op.Binary(); !strings.HasPrefix(got, sb) {
+		t.Fatalf("бинарь = %q, ждали внутри %q", got, sb)
+	}
 }
 
 // Пин на проводку слотов внутри buildSingboxCore: Register + Bootstrap +

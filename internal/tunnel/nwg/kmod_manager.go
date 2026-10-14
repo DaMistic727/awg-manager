@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	awgProxyDir = "/opt/etc/awg-manager/modules"
 	// ExpectedKmodVersion — минимальная версия awg_proxy.ko, которую несёт IPK
 	// в /opt/etc/awg-manager/modules. Экспортирована, чтобы system/info мог
 	// показать «в комплекте новее, чем загружено».
@@ -172,7 +171,7 @@ var modelsWithOwnBuild = map[string]bool{
 func resolveKoPathFor(base, model string, soc kmod.SoC, exists func(string) bool) (path, how string, err error) {
 	// 1. Per-model override (currently only KN-1011 HIGHMEM is unique)
 	if model != "" {
-		modelPath := fmt.Sprintf(awgProxyDir+"/%s-%s.ko", base, model)
+		modelPath := fmt.Sprintf(kmod.ModulesDir+"/%s-%s.ko", base, model)
 		if exists(modelPath) {
 			return modelPath, model, nil
 		}
@@ -185,7 +184,7 @@ func resolveKoPathFor(base, model string, soc kmod.SoC, exists func(string) bool
 
 	// 2. SoC-specific (e.g. awg_proxy-mt7628.ko for non-SMP mipsel)
 	if soc != kmod.SoCUnknown {
-		socPath := fmt.Sprintf(awgProxyDir+"/%s-%s.ko", base, string(soc))
+		socPath := fmt.Sprintf(kmod.ModulesDir+"/%s-%s.ko", base, string(soc))
 		if exists(socPath) {
 			return socPath, string(soc), nil
 		}
@@ -195,7 +194,7 @@ func resolveKoPathFor(base, model string, soc kmod.SoC, exists func(string) bool
 				base, soc, filepath.Base(socPath))
 		}
 		// 3. Arch default — SoC, чьей конфигурацией он и собран.
-		return awgProxyDir + "/" + base + ".ko", "", nil
+		return kmod.ModulesDir + "/" + base + ".ko", "", nil
 	}
 
 	// Модель есть, а SoC неизвестен — это Keenetic, которого не знает карта
@@ -209,7 +208,7 @@ func resolveKoPathFor(base, model string, soc kmod.SoC, exists func(string) bool
 	}
 
 	// Железо не опознано вовсе (NDMS не ответил, не-Keenetic) — выбора нет.
-	return awgProxyDir + "/" + base + ".ko", "", nil
+	return kmod.ModulesDir + "/" + base + ".ko", "", nil
 }
 
 // ensureKoPathLocked резолвит путь к .ko ровно там, где он нужен для insmod.

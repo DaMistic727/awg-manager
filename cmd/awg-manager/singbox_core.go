@@ -52,9 +52,16 @@ func buildSingboxCore(d singboxCoreDeps) singboxCore {
 	if dir == "" {
 		dir = singboxDataDir
 	}
+	// Небоевой каталог — и бинарь там же: установка и обновление из песочницы
+	// иначе переписывали бы боевой sing-box (F305). Пусто — умолчание оператора.
+	binary := ""
+	if dir != "" {
+		binary = filepath.Join(dir, filepath.Base(installer.DefaultBinaryPath))
+	}
 	op := singbox.NewOperator(singbox.OperatorDeps{
 		Log:               slog.Default().With("component", "singbox"),
 		Dir:               dir,
+		Binary:            binary,
 		Queries:           d.queries,
 		Commands:          d.commands,
 		AppLogger:         d.appLog,
@@ -112,7 +119,7 @@ func buildSingboxCore(d singboxCoreDeps) singboxCore {
 			d.appLog.AppLog(logging.LevelInfo, logging.GroupSingbox, logging.SubSBProcess, "orchestrator", "", msg)
 		}
 	})
-	orch.SetValidator(&orchValidatorAdapter{v: singbox.NewValidator(installer.DefaultBinaryPath)})
+	orch.SetValidator(&orchValidatorAdapter{v: singbox.NewValidator(op.Binary())})
 	// Propagate the sticky-stop intent so reload-triggered cold-starts
 	// (slot-file writes from router/deviceproxy/subscriptions) respect a
 	// user-pressed Stop in the same way the watchdog does.
@@ -315,7 +322,8 @@ func (a *app) setupSingboxRuntime() {
 		if !ok {
 			a.bootLog.Warn("managed-singbox", arch, "no embedded BinarySpec — install/update disabled")
 		} else {
-			a.singboxInstaller = installer.New(installer.DefaultBinaryPath, arch, spec, a.loggingService)
+			// Путь — оператора: в песочнице -data-dir установка не трогает боевой бинарь (F305).
+			a.singboxInstaller = installer.New(a.singboxOp.Binary(), arch, spec, a.loggingService)
 			a.singboxOp.SetInstaller(a.singboxInstaller)
 
 			// Stream sing-box install/update lifecycle over SSE so the UI

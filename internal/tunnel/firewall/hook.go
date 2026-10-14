@@ -8,11 +8,26 @@ import (
 	"strings"
 )
 
-// Пути по умолчанию (тесты переопределяют поля структуры).
-const (
+// Пути по умолчанию (тесты переопределяют поля структуры). Переменные, а не
+// константы: небоевой -data-dir перенацеливает их вместе (SetSandboxPaths).
+var (
 	defaultHookPath = "/opt/etc/ndm/netfilter.d/51-awgm-tunnel-fw.sh"
 	defaultListPath = "/opt/etc/awg-manager/tunnel-fw.list"
 )
+
+// SetSandboxPaths перенацеливает список туннелей и хук под небоевой каталог
+// данных (F305). Вместе: хук ссылается на список, и песочница со списком в
+// /tmp, но хуком на боевом месте переписала бы боевой скрипт ссылкой на
+// временный файл. Звать до первого Manager.
+func SetSandboxPaths(dataDir string) {
+	SetPaths(filepath.Join(dataDir, "ndm-netfilter.d", "51-awgm-tunnel-fw.sh"), filepath.Join(dataDir, "tunnel-fw.list"))
+}
+
+// Paths — текущие пути хука и списка; SetPaths — их установка (тесты
+// проводки возвращают прежние).
+func Paths() (hook, list string) { return defaultHookPath, defaultListPath }
+
+func SetPaths(hook, list string) { defaultHookPath, defaultListPath = hook, list }
 
 // syncHookState поддерживает файл-список туннель-интерфейсов и netfilter.d-хук,
 // который после каждой NDM-перезаписи таблиц переустанавливает наши правила.

@@ -10,6 +10,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/singbox/router"
 	"github.com/hoaxisr/awg-manager/internal/sys/kmod"
 	"github.com/hoaxisr/awg-manager/internal/tunnel"
+	"github.com/hoaxisr/awg-manager/internal/tunnel/firewall"
 )
 
 // F168: флаг `-data-dir` соблюдался наполовину — демон в песочнице всё равно
@@ -78,6 +79,10 @@ func TestApplyDataDir_RedirectsRouterPaths(t *testing.T) {
 	if got := router.NetfilterHookPath(); !strings.HasPrefix(got, dir) {
 		t.Errorf("хук ndm остался боевым при небоевом каталоге данных: %q", got)
 	}
+	// F305: список и хук firewall туннелей — туда же.
+	if hook, list := firewall.Paths(); !strings.HasPrefix(hook, dir) || !strings.HasPrefix(list, dir) {
+		t.Errorf("firewall остался боевым: hook=%q list=%q", hook, list)
+	}
 }
 
 // F487: каталог sing-box (config.d, pid) тоже следует -data-dir — иначе
@@ -117,8 +122,10 @@ func restorePaths(t *testing.T) {
 	arm := obfuscator.ArmPath
 	routerPaths := router.DataDirPaths()
 	sb := singboxDataDir
+	fwHook, fwList := firewall.Paths()
 	t.Cleanup(func() {
 		singboxDataDir = sb
+		firewall.SetPaths(fwHook, fwList)
 		tunnel.ConfDir, obfuscator.ConfDir, kmod.ModulesDir = conf, obf, mod
 		obfuscator.ArmPath = arm
 		router.SetNetfilterHookPath(hook)
