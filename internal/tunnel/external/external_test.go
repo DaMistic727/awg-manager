@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
+	"github.com/hoaxisr/awg-manager/internal/opkgtun"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/tunnel"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/service"
@@ -309,5 +310,30 @@ func TestList_NonOpkgTunRecordsDoNotHideExternal(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].InterfaceName != "opkgtun0" {
 		t.Fatalf("список = %+v, ждали сторонний opkgtun0", got)
+	}
+}
+
+// F316: взятие пишет awg<N> под семафором пула — номер, который пул уже
+// выдал открытой резервацией, взять нельзя: иначе резервация и взятие делили
+// бы один OpkgTun<N>.
+func TestAdopt_RefusesNumberUnderReservation(t *testing.T) {
+	stubScan(t, nil, nil)
+	stubLinkExists(t, false)
+	s := newTestService(t)
+	s.tunnelService = &fakeTunnelSvc{}
+	pool := opkgtun.NewPool(16, opkgtun.Source{Name: "пусто", Read: func(context.Context) (opkgtun.Taken, error) { return opkgtun.Taken{}, nil }})
+	res, err := pool.Reserve(context.Background(), opkgtun.WantPinned(opkgtun.TunnelHolder("awg9", "kernel"), 9))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Close()
+	s.SetOpkgTunPool(pool, func() bool { return true })
+
+	_, err = s.Adopt(context.Background(), AdoptRequest{InterfaceName: "opkgtun9", ConfContent: validAdoptConf, TunnelName: "Германия"})
+	if !errors.Is(err, opkgtun.ErrClaimed) {
+		t.Fatalf("err = %v, want ErrClaimed", err)
+	}
+	if list, _ := s.store.List(); len(list) != 0 {
+		t.Fatalf("запись заведена при отказе: %d", len(list))
 	}
 }

@@ -57,6 +57,15 @@ type ServiceImpl struct {
 	// Key: tunnelID (string), Value: *sync.Mutex
 	tunnelMu sync.Map
 
+	// importIDMu — выбор идентификатора импорта и запись туннеля одной
+	// критической секцией (F318). У NativeWG между выбором (NextAvailableID)
+	// и store.Create стоит RCI-импорт, и два импорта внахлёст брали один
+	// awg<N>; проигравший откатывал kmod/guard по ИДЕНТИФИКАТОРУ — то есть
+	// записи победителя. На OS 4.x kernel-путь берёт awgm<N> тем же перебором
+	// без резервации, поэтому замок держит и его.
+	// ponytail: один замок на все импорты; они редки и ручные.
+	importIDMu sync.Mutex
+
 	// wan is the unified WAN state model (up/down tracking).
 	wan *wan.Model
 
@@ -935,8 +944,10 @@ func (s *ServiceImpl) Import(ctx context.Context, confContent, name, backend str
 	}
 
 	// Kernel path.
+	s.importIDMu.Lock()
 	tunnelID, res, err := s.kernelID(ctx, parsed.Name)
 	if err != nil {
+		s.importIDMu.Unlock()
 		return nil, fmt.Errorf("generate ID: %w", err)
 	}
 	// Резервация держит номер до записи: без неё между выбором и Create
@@ -948,7 +959,9 @@ func (s *ServiceImpl) Import(ctx context.Context, confContent, name, backend str
 	parsed.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	parsed.Enabled = false
 
-	if err := s.store.Create(parsed); err != nil {
+	err = s.store.Create(parsed)
+	s.importIDMu.Unlock()
+	if err != nil {
 		return nil, fmt.Errorf("save tunnel: %w", err)
 	}
 	if err := config.WriteFile(parsed); err != nil {
@@ -1104,6 +1117,8 @@ func (s *ServiceImpl) importNativeWG(ctx context.Context, parsed *storage.AWGTun
 	// чересполосицей: номер kernel'а выдаёт пул, и открытую резервацию этот
 	// перебор не видит — проигравший получил бы «tunnel already exists» без
 	// ретрая (F317).
+	s.importIDMu.Lock()
+	defer s.importIDMu.Unlock()
 	tunnelID, err := s.store.NextAvailableID("nativewg")
 	if err != nil {
 		return nil, fmt.Errorf("generate ID: %w", err)

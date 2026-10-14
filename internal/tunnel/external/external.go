@@ -37,6 +37,17 @@ type Service struct {
 	// без них список остаётся прежним, просто беднее.
 	orphans      func(ctx context.Context) ([]OrphanIface, error)
 	descriptions func(ctx context.Context) map[int]string
+
+	// opkgPool — пул номеров OpkgTun: взятие пишет awg<N> под его семафором
+	// (F316), как и любой другой писатель номера. nil — запись напрямую.
+	opkgPool         *opkgtun.Pool
+	opkgTunSupported func() bool
+}
+
+// SetOpkgTunPool подключает пул номеров. Отдельным сеттером по той же
+// причине, что SetOrphanSource: пул собирается позже сервиса.
+func (s *Service) SetOpkgTunPool(pool *opkgtun.Pool, supported func() bool) {
+	s.opkgPool, s.opkgTunSupported = pool, supported
 }
 
 // OrphanIface — интерфейс OpkgTun, за которым не стоит ни одной записи панели.
@@ -416,8 +427,17 @@ func (s *Service) Adopt(ctx context.Context, req AdoptRequest) (*service.TunnelW
 		}
 	}
 
-	// Save to storage
-	if err := s.store.Create(t); err != nil {
+	// Save to storage. На OS 5.x — под семафором пула: открытая резервация
+	// или заявленный владелец номера (туннель, прокси, режим роутера) иначе
+	// получили бы тот же awg<N>/OpkgTun<N> (F316). След самой сторонней
+	// программы — аноним и взятию не мешает.
+	create := func() error { return s.store.Create(t) }
+	if s.opkgPool != nil && s.opkgTunSupported != nil && s.opkgTunSupported() {
+		err = s.opkgPool.ClaimIfFree(ctx, opkgtun.TunnelHolder(t.ID, t.Name), tunnelNum, create)
+	} else {
+		err = create()
+	}
+	if err != nil {
 		return nil, fmt.Errorf("save tunnel: %w", err)
 	}
 

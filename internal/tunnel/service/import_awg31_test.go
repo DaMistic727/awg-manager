@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hoaxisr/awg-manager/internal/opkgtun"
@@ -120,4 +121,36 @@ func serviceForImport(t *testing.T) (*ServiceImpl, string, string) {
 	}
 	svc.SetOpkgTunPool(pool, func() bool { return true })
 	return svc, tunnels, confs
+}
+
+// F318: на OS 4.x идентификатор awgm<N> выбирает перебор хранилища без
+// резервации — импорты внахлёст брали один номер, и проигравший падал на
+// «already exists». Замок выбора держит его до записи.
+func TestImportConcurrentOS4DistinctIDs(t *testing.T) {
+	s, _, _ := serviceForImport(t)
+	s.opkgTunSupported = func() bool { return false }
+
+	const n = 12
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.Import(context.Background(), awg31Conf("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", 12),
+				"t"+strconv.Itoa(i), "kernel", ImportLink{})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("параллельный импорт: %v", err)
+		}
+	}
+	list, err := s.store.List()
+	if err != nil || len(list) != n {
+		t.Fatalf("записей %d (err %v), want %d", len(list), err, n)
+	}
 }

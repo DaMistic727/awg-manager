@@ -237,6 +237,7 @@ func (a *app) setupServices() {
 		orphanIfaces(a.opkgPool, a.ndmsQueries.Interfaces),
 		ndmsDescriptionsFn(a.ndmsQueries.Interfaces),
 	)
+	a.externalService.SetOpkgTunPool(a.opkgPool, opkgTunSupported)
 
 	// System WireGuard tunnels (read-only + ASC editing) — constructed later,
 	// after ndmsQueries/ndmsCommands are available.
