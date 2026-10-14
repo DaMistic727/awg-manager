@@ -837,6 +837,12 @@ func (s *ServiceImpl) SetEnabled(ctx context.Context, tunnelID string, enabled b
 
 	s.logInfo("set-enabled", tunnelID, fmt.Sprintf("Enabled set to %v", enabled))
 	s.invalidateState(tunnelID)
+	// Кэш оркестратора решает по Enabled на WAN-up/WAN-down/reconnect:
+	// без обновления выключенный автостарт поднимался бы на ближайшем WAN-up,
+	// а включённый — не поднимался (F668).
+	if s.orch != nil {
+		s.orch.RefreshTunnelState(tunnelID)
+	}
 	return nil
 }
 

@@ -1070,6 +1070,18 @@ func (o *Orchestrator) updateState(action Action) {
 		return
 	}
 
+	// Enabled в кэше — зеркало записи: его читают decideWANUp/decideWANDown.
+	// Без зеркала остановленный пользователем туннель (запись Enabled=false,
+	// кэш — true с загрузки) поднимался на ближайшем WAN-up, а запущенный
+	// после загрузки не подвешивался на WAN-down (F668). Эти действия пишут
+	// Enabled в запись (execute.go).
+	switch action.Type {
+	case ActionColdStartKernel, ActionStartNativeWG, ActionPersistRunning:
+		t.Enabled = true
+	case ActionPersistStopped:
+		t.Enabled = false
+	}
+
 	switch action.Type {
 	case ActionColdStartKernel, ActionStartNativeWG, ActionReconcileNativeWG, ActionReconcileKernel, ActionResumeKernel:
 		t.Running = true
