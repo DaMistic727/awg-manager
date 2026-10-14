@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/tunnel"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/nwg"
+	"github.com/hoaxisr/awg-manager/internal/tunnel/ops"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/wan"
 )
 
@@ -59,8 +62,10 @@ type MockOperator struct {
 		MTU int
 	}
 	UpdateDescriptionCalls []descCall
-	SyncDNSCalls           [][]string
-	SyncAddressCalls       []struct {
+	// UpdateDescriptionErr — ответ UpdateDescription по prevName (нет ключа — nil).
+	UpdateDescriptionErr map[string]error
+	SyncDNSCalls         [][]string
+	SyncAddressCalls     []struct {
 		ID, Addr, IPv6 string
 		Prefix         int
 	}
@@ -145,7 +150,7 @@ type descCall struct{ ID, Prev, Desc string }
 
 func (m *MockOperator) UpdateDescription(ctx context.Context, tunnelID, prevName, description string) error {
 	m.UpdateDescriptionCalls = append(m.UpdateDescriptionCalls, descCall{tunnelID, prevName, description})
-	return nil
+	return m.UpdateDescriptionErr[prevName]
 }
 
 func (m *MockOperator) CaptureDescription(ctx context.Context, tunnelID, description string) error {
@@ -642,5 +647,46 @@ func TestShouldSyncRuntime(t *testing.T) {
 				t.Errorf("shouldSyncRuntime(%v) = %v, want %v", c.state, got, c.want)
 			}
 		})
+	}
+}
+
+// F535: прошлое переименование не дописало описание — в записи NDMS ещё более
+// раннее имя (stored.PrevName). Переименование повторяется с ним, иначе
+// цепочка переименований навсегда оставила бы запись «чужой».
+func TestSyncDescription_RetriesWithPrevName(t *testing.T) {
+	foreign := &ops.ForeignRecordError{NDMSName: "OpkgTun10", Description: "A", Want: "B"}
+	for _, tc := range []struct {
+		name      string
+		prevStore string
+		want      []string
+	}{
+		{"повтор с прежним именем", "A", []string{"B", "A"}},
+		{"прежнего имени нет — без повтора", "", []string{"B"}},
+		{"прежнее имя то же — без повтора", "B", []string{"B"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			op := &MockOperator{UpdateDescriptionErr: map[string]error{"B": foreign}}
+			s := &ServiceImpl{legacyOperator: op, state: NewMockStateManager()}
+			stored := &storage.AWGTunnel{ID: "awg10", Name: "C", PrevName: tc.prevStore}
+			s.syncDescription(context.Background(), "update", stored, "B", "C")
+			var got []string
+			for _, c := range op.UpdateDescriptionCalls {
+				got = append(got, c.Prev)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("prevName вызовов = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// F535: повтор — только на «запись чужая»; транспортный отказ не повод
+// переименовывать по прежнему имени.
+func TestSyncDescription_NoRetryOnOtherErrors(t *testing.T) {
+	op := &MockOperator{UpdateDescriptionErr: map[string]error{"B": errors.New("rci down")}}
+	s := &ServiceImpl{legacyOperator: op, state: NewMockStateManager()}
+	s.syncDescription(context.Background(), "update", &storage.AWGTunnel{ID: "awg10", Name: "C", PrevName: "A"}, "B", "C")
+	if len(op.UpdateDescriptionCalls) != 1 {
+		t.Fatalf("вызовов %d, want 1", len(op.UpdateDescriptionCalls))
 	}
 }

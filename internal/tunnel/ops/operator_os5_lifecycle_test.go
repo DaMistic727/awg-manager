@@ -1236,3 +1236,25 @@ func TestUpdateDescription_RecordReadError(t *testing.T) {
 		})
 	}
 }
+
+// F535: переименование не дописало описание записи (отказ записи, ребут до
+// save), устройства после ребута нет — запись с ПРЕЖНИМ именем всё ещё наша:
+// старт не отказывает, а переписывает описание на текущее имя.
+func TestReconcile_PrevNameDescriptionIsOurs(t *testing.T) {
+	const want = `{"interface":{"OpkgTun10":{"description":"Germany"}}}`
+	poster := &descriptionPoster{}
+	getter := ndmsquery.NewFakeGetter()
+	getter.SetJSON("/show/interface/", `{"OpkgTun10":{"id":"OpkgTun10","type":"OpkgTun","state":"up","link":"down","description":"Old name"}}`)
+	o, _ := newOS5LifecycleOn(t, poster, getter, &MockBackend{}, true) // amneziawg не живо
+	cfg := lifecycleCfg(t)
+	cfg.PrevName = "Old name"
+
+	err := o.Reconcile(context.Background(), cfg)
+	var foreign *ForeignRecordError
+	if errors.As(err, &foreign) {
+		t.Fatalf("запись с прежним именем сочтена чужой: %v", err)
+	}
+	if !hasPayload(poster.payloads, want) {
+		t.Fatalf("описание не переписано на текущее имя: %v", poster.payloads)
+	}
+}

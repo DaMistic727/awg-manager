@@ -42,3 +42,12 @@ func TestStoredToConfigCarriesAddressPrefix(t *testing.T) {
 		})
 	}
 }
+
+// F535: прежнее имя доезжает до конфига оператора — по нему гейт старта
+// OpkgTun узнаёт свою запись с недописанным описанием.
+func TestStoredToConfigCarriesPrevName(t *testing.T) {
+	cfg := StoredToConfig(&storage.AWGTunnel{ID: "awg10", Name: "New", PrevName: "Old"})
+	if cfg.PrevName != "Old" {
+		t.Fatalf("PrevName = %q, want Old", cfg.PrevName)
+	}
+}

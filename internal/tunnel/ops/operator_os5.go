@@ -79,8 +79,10 @@ func (e *ForeignRecordError) Error() string {
 // CreateOpkgTun и переименование через UpdateDescription; так же NDMS
 // восстанавливает сохранённую запись после ребута) либо под ней живое
 // amneziawg — такие устройства создаём только мы, а описание разошлось
-// (переименование без сохранения конфигурации); такое описание переписываем
-// на имя туннеля. Иначе — ForeignRecordError
+// (переименование без сохранения конфигурации), либо описание равно ПРЕЖНЕМУ
+// имени туннеля (cfg.PrevName: переименование не дописало описание или ребут
+// до save, F535); такое описание переписываем на имя туннеля. Иначе —
+// ForeignRecordError
 // ДО любой RCI-записи, до backend.Start и без rollbackStart: сторонняя
 // программа завела запись на нашем номере (F517), её устройство не наше.
 // Ошибка чтения — тоже отказ: «не знаем» ≠ «записи нет», Create поверх
@@ -103,16 +105,23 @@ func (o *OperatorOS5Impl) ensureOpkgTunRecord(ctx context.Context, op string, cf
 		o.logInfo(op, cfg.ID, "Created OpkgTun in NDMS")
 		return iface, true, false, nil
 	}
-	if !o.recordIsOurs(ctx, rec, cfg.Name, names.IfaceName) {
+	// Описание, равное прежнему имени, — тоже наша запись: переименование
+	// не дописало его в NDMS (F535). Ниже оно переписывается на текущее.
+	prevOurs := cfg.PrevName != "" && rec.Description == cfg.PrevName
+	if !prevOurs && !o.recordIsOurs(ctx, rec, cfg.Name, names.IfaceName) {
 		return query.Confirmed{}, false, false, tunnel.NewOpError(op, cfg.ID, "ndms",
 			&ForeignRecordError{NDMSName: names.NDMSName, Description: rec.Description, Want: cfg.Name})
 	}
 	if rec.Description != cfg.Name {
-		// Запись наша по живому amneziawg, описание разошлось — лечим: иначе
-		// после ребута (устройства ещё нет) гейт счёл бы её чужой. Провал
-		// записи старт не валит — запись всё равно наша.
-		o.logWarn(op, cfg.ID, fmt.Sprintf("описание записи %s %q ≠ имени туннеля %q; под записью живое amneziawg — запись наша, описание переписываем",
-			names.NDMSName, rec.Description, cfg.Name))
+		// Запись наша (живое amneziawg или прежнее имя), описание разошлось —
+		// лечим: иначе после ребута (устройства ещё нет) гейт счёл бы её
+		// чужой. Провал записи старт не валит — запись всё равно наша.
+		why := "под записью живое amneziawg"
+		if prevOurs {
+			why = "это прежнее имя туннеля"
+		}
+		o.logWarn(op, cfg.ID, fmt.Sprintf("описание записи %s %q ≠ имени туннеля %q; %s — запись наша, описание переписываем",
+			names.NDMSName, rec.Description, cfg.Name, why))
 		if err := o.commands.Interfaces.SetDescription(ctx, iface, cfg.Name); err != nil {
 			o.logWarn(op, cfg.ID, "set description: "+err.Error())
 		}
@@ -143,9 +152,12 @@ func (o *OperatorOS5Impl) freeOpkgTunDevice(ctx context.Context, op, tunnelID st
 	return free, nil
 }
 
-// recordIsOurs — единственное правило владения записью OpkgTunN (F517): её
-// описание равно имени туннеля либо под ней живое amneziawg (такие устройства
-// создаём только мы). Им пользуются и гейт старта, и переименование.
+// recordIsOurs — правило владения записью OpkgTunN (F517): её описание равно
+// имени туннеля либо под ней живое amneziawg (такие устройства создаём только
+// мы). Им пользуются гейт старта, переименование и Stop. Гейт старта сверх
+// того признаёт описание, равное прежнему имени (F535); переименование — через
+// повтор с прежним именем в service.syncDescription; Stop — нет (цена — не
+// выставленный conf: disabled у остановленного туннеля со старым описанием).
 func (o *OperatorOS5Impl) recordIsOurs(ctx context.Context, rec *ndms.Interface, name, iface string) bool {
 	if rec.Description == name {
 		return true

@@ -440,3 +440,26 @@ func TestNWGFloorNeverOverlapsOpkgTunRange(t *testing.T) {
 		t.Errorf("этой сборки: пол NativeWG = %d, потолок пула = %d", got, host)
 	}
 }
+
+// F535: прежнее имя ставит само хранилище — на смене Name, и только на ней.
+func TestAWGTunnelStore_UpdateSetsPrevNameOnRename(t *testing.T) {
+	dir := t.TempDir()
+	s := NewAWGTunnelStoreWithLockDir(filepath.Join(dir, "tunnels"), filepath.Join(dir, "locks"))
+	if err := s.Create(&AWGTunnel{ID: "awg10", Name: "Old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Update("awg10", func(t *AWGTunnel) error { t.Name = "New"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Get("awg10")
+	if got.PrevName != "Old" {
+		t.Fatalf("PrevName = %q, want Old", got.PrevName)
+	}
+	if err := s.Update("awg10", func(t *AWGTunnel) error { t.Enabled = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.Get("awg10")
+	if got.PrevName != "Old" {
+		t.Fatalf("правка без переименования сменила PrevName на %q", got.PrevName)
+	}
+}

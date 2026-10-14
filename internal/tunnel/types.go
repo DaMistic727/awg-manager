@@ -147,6 +147,9 @@ type Config struct {
 	// Identity
 	ID   string // Tunnel ID (e.g., "awg0")
 	Name string // Human-readable name
+	// PrevName — имя до последнего переименования (storage.AWGTunnel.PrevName):
+	// описание записи OpkgTun, равное ему, тоже признак нашей записи (F535).
+	PrevName string
 
 	// Network configuration
 	Address string // IPv4 address WITHOUT mask (e.g., "10.0.0.1") — в этом виде

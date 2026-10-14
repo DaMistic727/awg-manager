@@ -870,6 +870,8 @@ func TestTunnelUpdate_FieldInventoryComplete(t *testing.T) {
 		"RawKernelIface":     true,
 		"RawNdmsIface":       true,
 		"Locked":             true,
+		// Пишет только AWGTunnelStore.Update на смене Name (F535).
+		"PrevName": true,
 	}
 
 	rt := reflect.TypeOf(storage.AWGTunnel{})

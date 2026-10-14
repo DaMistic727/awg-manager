@@ -283,11 +283,17 @@ func (s *AWGTunnelStore) Update(id string, mut func(*AWGTunnel) error) error {
 	if err != nil {
 		return err
 	}
+	prevName := tunnel.Name
 	if err := mut(tunnel); err != nil {
 		if errors.Is(err, ErrNoChange) {
 			return nil
 		}
 		return err
+	}
+	// Единая точка всех переименований (handler, замена .conf, wdttlink):
+	// прежнее имя нужно гейту старта OpkgTun (F535).
+	if tunnel.Name != prevName {
+		tunnel.PrevName = prevName
 	}
 	return s.saveLocked(tunnel)
 }

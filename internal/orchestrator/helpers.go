@@ -29,6 +29,7 @@ func StoredToConfig(stored *storage.AWGTunnel) tunnel.Config {
 	return tunnel.Config{
 		ID:            stored.ID,
 		Name:          stored.Name,
+		PrevName:      stored.PrevName,
 		Address:       ipv4,
 		AddressPrefix: prefix,
 		AddressIPv6:   ipv6,

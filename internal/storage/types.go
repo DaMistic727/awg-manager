@@ -579,8 +579,13 @@ type ConnectivityCheckConfig struct {
 
 // AWGTunnel represents AmneziaWG tunnel metadata.
 type AWGTunnel struct {
-	ID                 string                   `json:"id"`
-	Name               string                   `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// PrevName — имя до последнего переименования. Ставит AWGTunnelStore.Update
+	// сам, на смене Name. Описание записи OpkgTun может остаться прежним
+	// (отказ записи описания, ребут до system configuration save) — тогда по
+	// нему запись всё ещё наша, и старт её узнаёт и переписывает (F535).
+	PrevName           string                   `json:"prevName,omitempty"`
 	Type               string                   `json:"type,omitempty"` // "awg"
 	Enabled            bool                     `json:"enabled"`
 	Locked             bool                     `json:"locked,omitempty"`             // Защита от изменений (#818): Stop/ToggleEnabled/ToggleDefaultRoute/Update/Delete/Replace отвечают 403

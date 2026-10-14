@@ -461,6 +461,13 @@ func (s *ServiceImpl) syncDescription(ctx context.Context, scope string, stored 
 		}
 	} else if s.legacyOperator != nil {
 		err = s.legacyOperator.UpdateDescription(ctx, stored.ID, prevName, name)
+		// Прошлое переименование могло не дописать описание (F535): в записи
+		// NDMS тогда ещё более раннее имя — оно в stored.PrevName. Один повтор
+		// с ним, иначе цепочка переименований навсегда оставит запись «чужой».
+		var foreign *ops.ForeignRecordError
+		if errors.As(err, &foreign) && stored.PrevName != "" && stored.PrevName != prevName {
+			err = s.legacyOperator.UpdateDescription(ctx, stored.ID, stored.PrevName, name)
+		}
 	}
 	if err != nil {
 		s.logWarn(scope, stored.ID, "Failed to update description: "+err.Error())
