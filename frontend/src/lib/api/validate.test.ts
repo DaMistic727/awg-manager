@@ -40,6 +40,27 @@ describe('validateApiResponse', () => {
 		).not.toThrow();
 	});
 
+	// F164/F291: схема /servers/all описывает реальный ответ writeAll —
+	// managed-серверы с публичными пирами и статистику картой по интерфейсу.
+	it('реальная форма /servers/all проходит, неверный тип managed — нет', () => {
+		const body = {
+			success: true,
+			data: {
+				servers: [],
+				managed: [{
+					interfaceName: 'Wireguard1', description: 'Дом', address: '10.10.0.1', mask: '255.255.255.0',
+					listenPort: 51821, natEnabled: true, policy: 'none',
+					peers: [{ publicKey: 'k=', description: 'p', tunnelIP: '10.10.0.2/32', enabled: true, remoteSubnets: ['192.168.77.0/24'] }],
+				}],
+				managedStats: { Wireguard1: { status: 'up', peers: [{ publicKey: 'k=', rxBytes: 1, txBytes: 2, lastHandshake: '', online: true }] } },
+			},
+		};
+		expect(() => validateApiResponse('GET', '/servers/all', body)).not.toThrow();
+		expect(() =>
+			validateApiResponse('GET', '/servers/all', { success: true, data: { managed: [{ listenPort: 'x' }] } }),
+		).toThrow();
+	});
+
 	it('пропущенные и null-поля валидны (Go omitempty / nil-слайсы)', () => {
 		expect(() => validateApiResponse('GET', '/tunnels/list', { success: true })).not.toThrow();
 		expect(() =>

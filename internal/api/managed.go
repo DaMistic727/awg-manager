@@ -18,7 +18,8 @@ import (
 
 // ── Response DTOs ────────────────────────────────────────────────
 
-// ManagedPeerDTO mirrors frontend ManagedPeer.
+// ManagedPeerDTO — пир managed-сервера с ключами: ответ добавления пира и
+// бэкап (storage.ManagedPeer). Без ключей — ManagedPeerPublicDTO.
 type ManagedPeerDTO struct {
 	PublicKey    string `json:"publicKey" example:"HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH="`
 	PrivateKey   string `json:"privateKey" example:"IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII="`
@@ -39,26 +40,6 @@ type ManagedPeerDTO struct {
 	// пусто — весь трафик). RemoteSubnets — сети за клиентом, IPv4 CIDR (#713).
 	ClientAllowedIPs string   `json:"clientAllowedIPs,omitempty" example:"10.10.0.0/24, 192.168.1.0/24"`
 	RemoteSubnets    []string `json:"remoteSubnets,omitempty" example:"192.168.77.0/24"`
-}
-
-// ManagedServerDTO mirrors frontend ManagedServer.
-type ManagedServerDTO struct {
-	InterfaceName string   `json:"interfaceName" example:"Wireguard1"`
-	Address       string   `json:"address" example:"10.10.0.1"`
-	Mask          string   `json:"mask" example:"255.255.255.0"`
-	ListenPort    int      `json:"listenPort" example:"51821"`
-	Endpoint      string   `json:"endpoint,omitempty" example:"203.0.113.42:51821"`
-	DNS           string   `json:"dns,omitempty" example:"8.8.8.8"`
-	MTU           int      `json:"mtu,omitempty" example:"1420"`
-	NatEnabled    bool     `json:"natEnabled,omitempty" example:"true"`
-	NATMode       string   `json:"natMode,omitempty" example:"internet-only"`
-	LANSegments   []string `json:"lanSegments,omitempty" example:"Home"`
-	// ForeignACLs — чужие списки `ip access-group … in` на интерфейсе сервера
-	// (кроме нашего AWGM_<iface>), в порядке привязки. Список, привязанный
-	// раньше нашего и разрешающий шире, срабатывает до выбора сегментов.
-	ForeignACLs []string         `json:"foreignAcls,omitempty" example:"GUEST_ACL"`
-	Policy      string           `json:"policy" example:"default"`
-	Peers       []ManagedPeerDTO `json:"peers"`
 }
 
 // ManagedServerResponse is the envelope for GET /managed-server.
@@ -198,8 +179,10 @@ func isValidWGKey(key string) bool {
 	return err == nil && len(decoded) == 32
 }
 
-// managedServerResponse is a safe DTO that strips private keys from peers.
-type managedServerResponse struct {
+// ManagedServerDTO — ответ о managed-сервере: безопасный DTO без приватных
+// ключей пиров. Он же — схема swagger: зеркала рядом нет, поле ответа не
+// разойдётся с документацией (F291).
+type ManagedServerDTO struct {
 	InterfaceName string   `json:"interfaceName"`
 	Description   string   `json:"description,omitempty"`
 	Address       string   `json:"address"`
@@ -214,13 +197,13 @@ type managedServerResponse struct {
 	// ForeignACLs — чужие списки `ip access-group … in` на интерфейсе сервера
 	// (кроме нашего AWGM_<iface>), в порядке привязки. Список, привязанный
 	// раньше нашего и разрешающий шире, срабатывает до выбора сегментов.
-	ForeignACLs []string            `json:"foreignAcls,omitempty"`
-	Policy      string              `json:"policy"`
-	Peers       []managedPeerPublic `json:"peers"`
+	ForeignACLs []string               `json:"foreignAcls,omitempty"`
+	Policy      string                 `json:"policy"`
+	Peers       []ManagedPeerPublicDTO `json:"peers"`
 }
 
-// managedPeerPublic is a peer DTO without private/preshared keys.
-type managedPeerPublic struct {
+// ManagedPeerPublicDTO is a peer DTO without private/preshared keys.
+type ManagedPeerPublicDTO struct {
 	PublicKey   string `json:"publicKey"`
 	Description string `json:"description"`
 	TunnelIP    string `json:"tunnelIP"`
@@ -241,10 +224,10 @@ type managedPeerPublic struct {
 }
 
 // toManagedServerResponse converts storage model to a safe response DTO.
-func toManagedServerResponse(s *storage.ManagedServer, foreign []string) *managedServerResponse {
-	peers := make([]managedPeerPublic, len(s.Peers))
+func toManagedServerResponse(s *storage.ManagedServer, foreign []string) *ManagedServerDTO {
+	peers := make([]ManagedPeerPublicDTO, len(s.Peers))
 	for i, p := range s.Peers {
-		peers[i] = managedPeerPublic{
+		peers[i] = ManagedPeerPublicDTO{
 			PublicKey:        p.PublicKey,
 			Description:      p.Description,
 			TunnelIP:         p.TunnelIP,
@@ -260,7 +243,7 @@ func toManagedServerResponse(s *storage.ManagedServer, foreign []string) *manage
 			RemoteSubnets:    p.RemoteSubnets,
 		}
 	}
-	return &managedServerResponse{
+	return &ManagedServerDTO{
 		InterfaceName: s.InterfaceName,
 		Description:   s.Description,
 		Address:       s.Address,
@@ -333,9 +316,9 @@ func (h *ManagedServerHandler) foreignACLsFor(ctx context.Context, iface string)
 // getManagedList builds the list of managed server DTOs for the composite
 // servers snapshot. Always returns a non-nil slice so callers can json-marshal
 // it as `[]` rather than `null`.
-func (h *ManagedServerHandler) getManagedList(ctx context.Context) []*managedServerResponse {
+func (h *ManagedServerHandler) getManagedList(ctx context.Context) []*ManagedServerDTO {
 	servers := h.svc.List()
-	out := make([]*managedServerResponse, 0, len(servers))
+	out := make([]*ManagedServerDTO, 0, len(servers))
 	for i := range servers {
 		out = append(out, toManagedServerResponse(&servers[i], h.foreignACLsFor(ctx, servers[i].InterfaceName)))
 	}

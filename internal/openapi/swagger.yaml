@@ -2305,6 +2305,43 @@ definitions:
         example: 10.10.0.2
         type: string
     type: object
+  api.ManagedPeerPublicDTO:
+    properties:
+      clientAllowedIPs:
+        description: |-
+          ClientAllowedIPs — строка AllowedIPs в .conf клиента (CIDR через запятую,
+          пусто — весь трафик). RemoteSubnets — сети за клиентом, IPv4 CIDR (#713).
+        type: string
+      description:
+        type: string
+      dns:
+        type: string
+      enabled:
+        type: boolean
+      i1:
+        description: |-
+          I1..I5 и SignatureProfile — сигнатура имитации пира (CONTEXT.md
+          «Владелец сигнатуры»); попадает в .conf этого пира.
+        type: string
+      i2:
+        type: string
+      i3:
+        type: string
+      i4:
+        type: string
+      i5:
+        type: string
+      publicKey:
+        type: string
+      remoteSubnets:
+        items:
+          type: string
+        type: array
+      signatureProfile:
+        type: string
+      tunnelIP:
+        type: string
+    type: object
   api.ManagedPeerResponse:
     properties:
       data:
@@ -2410,54 +2447,42 @@ definitions:
   api.ManagedServerDTO:
     properties:
       address:
-        example: 10.10.0.1
+        type: string
+      description:
         type: string
       dns:
-        example: 8.8.8.8
         type: string
       endpoint:
-        example: 203.0.113.42:51821
         type: string
       foreignAcls:
         description: |-
           ForeignACLs — чужие списки `ip access-group … in` на интерфейсе сервера
           (кроме нашего AWGM_<iface>), в порядке привязки. Список, привязанный
           раньше нашего и разрешающий шире, срабатывает до выбора сегментов.
-        example:
-        - GUEST_ACL
         items:
           type: string
         type: array
       interfaceName:
-        example: Wireguard1
         type: string
       lanSegments:
-        example:
-        - Home
         items:
           type: string
         type: array
       listenPort:
-        example: 51821
         type: integer
       mask:
-        example: 255.255.255.0
         type: string
       mtu:
-        example: 1420
         type: integer
       natEnabled:
-        example: true
         type: boolean
       natMode:
-        example: internet-only
         type: string
       peers:
         items:
-          $ref: '#/definitions/api.ManagedPeerDTO'
+          $ref: '#/definitions/api.ManagedPeerPublicDTO'
         type: array
       policy:
-        example: default
         type: string
     type: object
   api.ManagedServerDriftEnvelope:
@@ -3984,15 +4009,18 @@ definitions:
     type: object
   api.ServersAllData:
     properties:
+      managed:
+        items:
+          $ref: '#/definitions/api.ManagedServerDTO'
+        type: array
       managedStats:
-        $ref: '#/definitions/api.ManagedServerStatsDTO'
+        additionalProperties:
+          $ref: '#/definitions/api.ManagedServerStatsDTO'
+        type: object
       servers:
         items:
           $ref: '#/definitions/api.WireguardServerDTO'
         type: array
-      wanIP:
-        example: 203.0.113.42
-        type: string
     type: object
   api.ServersAllResponse:
     properties:
@@ -13927,7 +13955,7 @@ paths:
   /servers/all:
     get:
       description: 'Returns the composite servers snapshot: WireGuard servers list,
-        managed server, stats and WAN IP.'
+        managed servers and their stats.'
       produces:
       - application/json
       responses:

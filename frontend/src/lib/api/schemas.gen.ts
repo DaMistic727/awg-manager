@@ -814,6 +814,22 @@ const api_ManagedPeerDTO: v.GenericSchema = v.looseObject({
 	tunnelIP: v.optional(v.nullable(v.string())),
 });
 
+const api_ManagedPeerPublicDTO: v.GenericSchema = v.looseObject({
+	clientAllowedIPs: v.optional(v.nullable(v.string())),
+	description: v.optional(v.nullable(v.string())),
+	dns: v.optional(v.nullable(v.string())),
+	enabled: v.optional(v.nullable(v.boolean())),
+	i1: v.optional(v.nullable(v.string())),
+	i2: v.optional(v.nullable(v.string())),
+	i3: v.optional(v.nullable(v.string())),
+	i4: v.optional(v.nullable(v.string())),
+	i5: v.optional(v.nullable(v.string())),
+	publicKey: v.optional(v.nullable(v.string())),
+	remoteSubnets: v.optional(v.nullable(v.array(v.string()))),
+	signatureProfile: v.optional(v.nullable(v.string())),
+	tunnelIP: v.optional(v.nullable(v.string())),
+});
+
 const api_ManagedPeerResponse: v.GenericSchema = v.looseObject({
 	data: v.optional(v.nullable(v.lazy(() => api_ManagedPeerDTO))),
 	success: v.optional(v.nullable(v.boolean())),
@@ -859,6 +875,7 @@ const api_ManagedServerBackupFile: v.GenericSchema = v.looseObject({
 
 const api_ManagedServerDTO: v.GenericSchema = v.looseObject({
 	address: v.optional(v.nullable(v.string())),
+	description: v.optional(v.nullable(v.string())),
 	dns: v.optional(v.nullable(v.string())),
 	endpoint: v.optional(v.nullable(v.string())),
 	foreignAcls: v.optional(v.nullable(v.array(v.string()))),
@@ -869,7 +886,7 @@ const api_ManagedServerDTO: v.GenericSchema = v.looseObject({
 	mtu: v.optional(v.nullable(v.number())),
 	natEnabled: v.optional(v.nullable(v.boolean())),
 	natMode: v.optional(v.nullable(v.string())),
-	peers: v.optional(v.nullable(v.array(v.lazy(() => api_ManagedPeerDTO)))),
+	peers: v.optional(v.nullable(v.array(v.lazy(() => api_ManagedPeerPublicDTO)))),
 	policy: v.optional(v.nullable(v.string())),
 });
 
@@ -1442,9 +1459,9 @@ const api_ServerSettingsDTO: v.GenericSchema = v.looseObject({
 });
 
 const api_ServersAllData: v.GenericSchema = v.looseObject({
-	managedStats: v.optional(v.nullable(v.lazy(() => api_ManagedServerStatsDTO))),
+	managed: v.optional(v.nullable(v.array(v.lazy(() => api_ManagedServerDTO)))),
+	managedStats: v.optional(v.nullable(v.record(v.string(), v.lazy(() => api_ManagedServerStatsDTO)))),
 	servers: v.optional(v.nullable(v.array(v.lazy(() => api_WireguardServerDTO)))),
-	wanIP: v.optional(v.nullable(v.string())),
 });
 
 const api_ServersAllResponse: v.GenericSchema = v.looseObject({

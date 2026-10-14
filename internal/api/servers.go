@@ -112,10 +112,12 @@ type ManagedServerStatsDTO struct {
 }
 
 // ServersAllData is the composite payload for GET /servers/all.
+// Поля — ровно те, что пишет writeAll (F164): managed-серверы и их
+// статистика по имени интерфейса.
 type ServersAllData struct {
-	Servers      []WireguardServerDTO   `json:"servers"`
-	ManagedStats *ManagedServerStatsDTO `json:"managedStats"`
-	WANIP        string                 `json:"wanIP" example:"203.0.113.42"`
+	Servers      []WireguardServerDTO             `json:"servers"`
+	Managed      []ManagedServerDTO               `json:"managed"`
+	ManagedStats map[string]ManagedServerStatsDTO `json:"managedStats"`
 }
 
 // ServersAllResponse is the envelope for GET /servers/all.
@@ -401,7 +403,7 @@ func (h *ServersHandler) writeAll(w http.ResponseWriter, r *http.Request) {
 	for i, srv := range list {
 		enriched[i] = h.enrichServerDTO(ctx, srv)
 	}
-	managedList := []*managedServerResponse{}
+	managedList := []*ManagedServerDTO{}
 	managedStats := map[string]*managed.ManagedServerStats{}
 	if h.managed != nil {
 		managedList = h.managed.getManagedList(ctx)
@@ -438,12 +440,12 @@ func (h *ServersHandler) overlayLivePeers(ctx context.Context, list []ndms.Wireg
 	wg.Wait()
 }
 
-// GetAll returns the composite servers snapshot (list + managed + stats + wanIP).
+// GetAll returns the composite servers snapshot (list + managed + stats).
 // Replaces the snapshot:servers SSE event — the frontend polls this.
 // GET /api/servers/all
 //
 //	@Summary		Get all servers snapshot
-//	@Description	Returns the composite servers snapshot: WireGuard servers list, managed server, stats and WAN IP.
+//	@Description	Returns the composite servers snapshot: WireGuard servers list, managed servers and their stats.
 //	@Tags			servers
 //	@Produce		json
 //	@Security		CookieAuth
