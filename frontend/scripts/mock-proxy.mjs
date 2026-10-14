@@ -3501,7 +3501,9 @@ function mockFreeturnAllowlistStatus(al, serverId) {
 	return {
 		enabled,
 		clientsFile: al.clientsFile,
-		clients: enabled ? al.clients.map(withLink) : [],
+		// Как бэкенд (ftlink.Service.List): у выключенного списка файл по
+		// умолчанию читается и записи отдаются (F368).
+		clients: al.clients.map(withLink),
 	};
 }
 
