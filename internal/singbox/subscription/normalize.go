@@ -82,22 +82,53 @@ func splitShareURLs(s string, startRe *regexp.Regexp) []string {
 // The returned slice is the list of share links the caller should then feed
 // to vlink.ParseBatch.
 func NormalizeBody(body []byte, contentType string) []string {
+	links, _ := normalizeBodyCounted(body, contentType)
+	return links
+}
+
+// normalizeBodyCounted — NormalizeBody плюс число строк текстового тела со
+// схемой ссылки, которую подписка не принимает (F402): раньше они пропадали
+// молча — ни в Errors, ни в счётчиках. HTML-страница не считается: ссылок
+// на ней много и все посторонние.
+func normalizeBodyCounted(body []byte, contentType string) (links []string, unsupported int) {
 	if decoded, ok := vlink.DoubleDecode(body); ok {
 		return splitLines(decoded)
 	}
 	if isHTML(body, contentType) {
 		extracted := extractFromHTML(body)
 		if len(extracted) > 0 {
-			return extracted
+			return extracted, 0
 		}
 	}
 	return splitLines(body)
 }
 
-func splitLines(b []byte) []string {
+// anySchemeRe — первая схема ссылки в строке (после начала или пробела).
+var anySchemeRe = regexp.MustCompile(`(?i)(?:^|\s)([a-z][a-z0-9+.\-]*)://`)
+
+// foreignSchemeLine разбирает строку без поддерживаемой ссылки: vmess
+// уходит ParseBatch целиком (его счётчик SkippedVmess), http(s) — проза
+// (заголовки подписок, ссылки на каналы; connect-URL TrustTunnel в теле
+// подписки не поддерживается — F401), прочая схема (socks5, wireguard, …) —
+// неподдерживаемая: подписка её не принимает (решение владельца 14.10).
+func foreignSchemeLine(p string) (forward string, unsupported bool) {
+	m := anySchemeRe.FindStringSubmatchIndex(p)
+	if m == nil {
+		return "", false
+	}
+	switch strings.ToLower(p[m[2]:m[3]]) {
+	case "vmess":
+		return strings.TrimSpace(p[m[2]:]), false
+	case "http", "https":
+		return "", false
+	}
+	return "", true
+}
+
+func splitLines(b []byte) (out []string, unsupported int) {
 	s := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(string(b))
 	parts := strings.Split(s, "\n")
-	out := make([]string, 0, len(parts))
+	out = make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p == "" || strings.HasPrefix(p, "#") {
@@ -105,13 +136,18 @@ func splitLines(b []byte) []string {
 		}
 		links := splitShareURLs(p, shareURLStartPlain)
 		if len(links) == 0 {
+			if fwd, unsup := foreignSchemeLine(p); fwd != "" {
+				out = append(out, fwd)
+			} else if unsup {
+				unsupported++
+			}
 			continue
 		}
 		for _, link := range links {
 			out = append(out, trimShareURLSuffix(link))
 		}
 	}
-	return out
+	return out, unsupported
 }
 
 func isHTML(body []byte, contentType string) bool {

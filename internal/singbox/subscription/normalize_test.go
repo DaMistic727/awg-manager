@@ -129,3 +129,27 @@ func TestNormalize_TTTrailingCaption(t *testing.T) {
 		t.Fatalf("lines=%q want [tt://?AAAA]", lines)
 	}
 }
+
+// F402: строки с незнакомой схемой больше не пропадают молча. vmess доходит
+// до ParseBatch (его счётчик), socks5 и прочие — «неподдерживаемые»,
+// http(s) — проза заголовка подписки.
+func TestParseSubscriptionBody_CountsForeignSchemes(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		"vless://uuid@example.com:443?security=tls#ok",
+		"vmess://eyJhZGQiOiIxLjIuMy40In0=",
+		"socks5://user:pass@1.2.3.4:1080",
+		"wireguard://abc@5.6.7.8:51820",
+		"Канал: https://t.me/provider",
+		"Осталось 28 дней",
+	}, "\n"))
+	res := parseSubscriptionBody(body, "text/plain")
+	if len(res.Outbounds) != 1 {
+		t.Fatalf("outbounds = %d, want 1 (socks5 из подписки не принимается)", len(res.Outbounds))
+	}
+	if res.SkippedVmess != 1 {
+		t.Fatalf("SkippedVmess = %d, want 1", res.SkippedVmess)
+	}
+	if res.SkippedUnsupp != 2 {
+		t.Fatalf("SkippedUnsupp = %d, want 2 (socks5, wireguard)", res.SkippedUnsupp)
+	}
+}

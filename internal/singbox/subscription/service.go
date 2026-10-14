@@ -1814,7 +1814,10 @@ func parseSubscriptionBody(body []byte, ct string) vlink.BatchResult {
 	case vlink.IsTrustTunnelTOML(body):
 		return vlink.ParseTrustTunnelTOML(body)
 	default:
-		return vlink.ParseBatch(NormalizeBody(body, ct))
+		links, unsupported := normalizeBodyCounted(body, ct)
+		res := vlink.ParseBatch(links)
+		res.SkippedUnsupp += unsupported
+		return res
 	}
 }
 
