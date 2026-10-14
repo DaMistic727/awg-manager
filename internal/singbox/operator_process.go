@@ -407,7 +407,8 @@ func (o *Operator) CrashStats() (recentCrashes int, lastCrashReason string, rest
 }
 
 // setLastError stores the most recent fatal/exit reason. Cleared on
-// a successful Start (see startAndWait below).
+// a successful Start (see startAndWait below). Writers pass text through
+// sanitizeSingboxLogText, which also cuts URLs (MC8).
 func (o *Operator) setLastError(s string) {
 	o.lastErrorMu.Lock()
 	o.lastError = s
