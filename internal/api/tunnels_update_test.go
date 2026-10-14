@@ -295,6 +295,8 @@ type stubTunnelSvc struct {
 	replaceCalls int
 	replaceErr   error
 	replaceNames []string
+	startCalls   int
+	startCtxErrs []error
 
 	setEnabledCalls      []toggleCall
 	setDefaultRouteCalls []toggleCall
@@ -321,7 +323,11 @@ func (s *stubTunnelSvc) Delete(ctx context.Context, tunnelID string) error {
 	}
 	return nil
 }
-func (s *stubTunnelSvc) Start(context.Context, string) error { return nil }
+func (s *stubTunnelSvc) Start(ctx context.Context, _ string) error {
+	s.startCalls++
+	s.startCtxErrs = append(s.startCtxErrs, ctx.Err())
+	return nil
+}
 func (s *stubTunnelSvc) Stop(ctx context.Context, tunnelID string) error {
 	if s.stopFn != nil {
 		return s.stopFn(ctx, tunnelID)
@@ -1127,5 +1133,72 @@ func TestTunnelReplaceConf_SameLongNameNotRefused(t *testing.T) {
 
 	if stub.replaceCalls != 1 || strings.Contains(rec.Body.String(), "длиннее 256 байт") {
 		t.Fatalf("замена с прежним именем отвергнута: replace=%d, тело: %s", stub.replaceCalls, rec.Body.String())
+	}
+}
+
+// F520: замена упала после Stop — работавший туннель поднимается обратно, а
+// не остаётся выключенным; невключённый так и остаётся невключённым.
+func TestTunnelReplaceConf_FailedReplaceRestartsRunningTunnel(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		state      tunnel.State
+		wantStarts int
+	}{
+		{"running", tunnel.StateRunning, 1},
+		{"stopped", tunnel.StateStopped, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubTunnelSvc{
+				stateFn:    func(string) tunnel.StateInfo { return tunnel.StateInfo{State: tc.state} },
+				replaceErr: errors.New("parse conf: bad key"),
+			}
+			h, store := newTunnelsUpdateHarness(t, stub)
+			if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL"}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			body, _ := json.Marshal(map[string]string{"content": "[Interface]\n"})
+			rec := httptest.NewRecorder()
+			h.ReplaceConf(rec, httptest.NewRequest(http.MethodPost, "/tunnels/replace?id=awg11", bytes.NewReader(body)))
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("код = %d, тело: %s", rec.Code, rec.Body.String())
+			}
+			if stub.startCalls != tc.wantStarts {
+				t.Fatalf("Start вызван %d раз, ждали %d", stub.startCalls, tc.wantStarts)
+			}
+		})
+	}
+}
+
+// F520: клиент закрыл вкладку посреди замены — повторный старт всё равно
+// исполняется: оркестратор на отменённом контексте не делает ничего, а Stop
+// уже снял Enabled.
+func TestTunnelReplaceConf_RestartIgnoresClientCancel(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		replaceErr error
+	}{
+		{"replace failed", errors.New("parse conf: bad key")},
+		{"replace ok", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubTunnelSvc{
+				stateFn:    func(string) tunnel.StateInfo { return tunnel.StateInfo{State: tunnel.StateRunning} },
+				replaceErr: tc.replaceErr,
+			}
+			h, store := newTunnelsUpdateHarness(t, stub)
+			if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL"}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			body, _ := json.Marshal(map[string]string{"content": "[Interface]\n"})
+			req := httptest.NewRequest(http.MethodPost, "/tunnels/replace?id=awg11", bytes.NewReader(body)).WithContext(ctx)
+			h.ReplaceConf(httptest.NewRecorder(), req)
+
+			if len(stub.startCtxErrs) != 1 || stub.startCtxErrs[0] != nil {
+				t.Fatalf("Start получил контекст с ошибкой %v, ждали живой", stub.startCtxErrs)
+			}
+		})
 	}
 }

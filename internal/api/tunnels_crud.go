@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -906,9 +907,23 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Повторный старт откатывает НАШ Stop выше, а не исполняет новую команду
+	// пользователя, поэтому отмену запроса он не слушает: оркестратор на
+	// отменённом контексте ничего не делает (#426), а Stop уже снял Enabled —
+	// закрытая вкладка оставила бы туннель выключенным и после ребута (F520).
+	restartCtx := context.WithoutCancel(r.Context())
+
 	// Replace config
 	var warnings []string
 	if err := h.svc.ReplaceConfig(r.Context(), id, req.Content, req.Name); err != nil {
+		// Туннель уже остановлен выше: без повторного старта отказ замены
+		// оставил бы работавший туннель выключенным (F520). Конфиг при отказе
+		// прежний — поднимается то, что работало.
+		if wasRunning {
+			if startErr := h.svc.Start(restartCtx, id); startErr != nil {
+				h.log.Warn("replace", stored.Name, "Restart after failed config replace failed: "+startErr.Error())
+			}
+		}
 		if strings.Contains(err.Error(), "not found") {
 			response.ErrorWithStatus(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
 			return
@@ -927,7 +942,7 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 
 	// Restart if was running
 	if wasRunning {
-		if err := h.svc.Start(r.Context(), id); err != nil {
+		if err := h.svc.Start(restartCtx, id); err != nil {
 			warnings = append(warnings, "tunnel config replaced but failed to restart: "+err.Error())
 		}
 	}
