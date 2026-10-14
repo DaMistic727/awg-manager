@@ -256,18 +256,25 @@ func TestVisibleAgreesWithAppLog(t *testing.T) {
 	}
 }
 
-// Журнал выключен целиком — не пишем и не разрешаем поставщику готовить запись.
-func TestVisibleFalseWhenLoggingDisabled(t *testing.T) {
+// Журнал выключен — пишутся только ошибки: авария не должна исчезать
+// бесследно (F313). Остальные уровни поставщику готовить незачем.
+func TestVisibleOnlyErrorsWhenLoggingDisabled(t *testing.T) {
 	s := NewService(&mockSettings{enabled: false, maxAge: 2, logLevel: "debug",
 		appMaxEntries: 100, sbMaxEntries: 100})
 	defer s.Stop()
 
-	if s.Visible(LevelError) {
-		t.Error("Visible=true при выключенном журнале")
+	for _, l := range []Level{LevelDebug, LevelInfo, LevelWarn} {
+		if s.Visible(l) {
+			t.Errorf("Visible(%s)=true при выключенном журнале", l)
+		}
 	}
+	if !s.Visible(LevelError) {
+		t.Error("Visible(error)=false при выключенном журнале")
+	}
+	s.AppLog(LevelWarn, GroupTunnel, SubConnectivity, "act", "tgt", "warn")
 	s.AppLog(LevelError, GroupTunnel, SubConnectivity, "act", "tgt", "msg")
-	if _, n := s.GetLogs(BucketApp, "", "", "", time.Time{}, 10, 0); n != 0 {
-		t.Errorf("записей %d при выключенном журнале", n)
+	if logs, n := s.GetLogs(BucketApp, "", "", "", time.Time{}, 10, 0); n != 1 || logs[0].Message != "msg" {
+		t.Errorf("записи %+v, ждали одну ошибку", logs)
 	}
 }
 

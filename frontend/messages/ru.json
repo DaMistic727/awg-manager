@@ -228,7 +228,7 @@
 	"settings_dnsroute_interval_hint": "Рекомендуется от 6 до 24 часов",
 	"settings_dnsroute_daily_hint": "Локальное время роутера",
 	"settings_logging_label": "Логирование",
-	"settings_logging_description": "Запись событий приложения в память для отладки и аудита.",
+	"settings_logging_description": "Запись событий приложения в память для отладки и аудита. Ошибки записываются и при выключенном логировании.",
 	"settings_logging_hours_option": "{hours} ч",
 	"settings_logging_awgm_level_label": "Уровень логирования AWGM",
 	"settings_logging_awgm_level_description": "INFO — результаты операций. FULL — промежуточные шаги и debug-строки sing-box. DEBUG — полная информация, включая trace движка.",

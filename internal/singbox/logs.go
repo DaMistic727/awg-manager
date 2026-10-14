@@ -273,9 +273,9 @@ func (f *LogForwarder) desiredClashLevel() string {
 	if f.gate == nil {
 		return "trace"
 	}
-	// Журнал выключен целиком: Visible возвращает false даже для error. Держать
-	// ради этого постоянное соединение с движком и разбирать каждую строку,
-	// чтобы тут же её выбросить, — ровно та работа, которую эта ветка убирает.
+	// Шлюз не пропускает даже error — журнал не нужен вовсе: держать ради
+	// этого соединение с движком и разбирать каждую строку, чтобы тут же её
+	// выбросить, — ровно та работа, которую эта ветка убирает.
 	if !f.gate.Visible(logging.LevelError) {
 		return ""
 	}
@@ -286,6 +286,10 @@ func (f *LogForwarder) desiredClashLevel() string {
 		return "debug"
 	case f.gate.Visible(logging.LevelInfo):
 		return "info"
+	case !f.gate.Visible(logging.LevelWarn):
+		// Журнал выключен, но ошибки пишутся всегда (F313): у движка просим
+		// только их — warn сюда не пересекает сокет.
+		return "error"
 	default:
 		// error и warn проходят при любом пороге (IsVisible).
 		return "warn"

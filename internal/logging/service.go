@@ -92,7 +92,11 @@ func (s *Service) IsEnabled() bool {
 // дорогой поставщик мог спросить ДО подготовки записи.
 func (s *Service) Visible(level Level) bool {
 	if !s.IsEnabled() {
-		return false
+		// Ошибки пишутся и при выключенном журнале (решение владельца
+		// 14.10): иначе авария — паника обработчика в том числе — не
+		// оставляла бы следа, а stderr демона под start-stop-daemon -b
+		// уходит в /dev/null (F313). Кольцо в памяти, флеш не трогается.
+		return level == LevelError
 	}
 	return IsVisible(level, Level(s.settings.GetLogLevel()))
 }

@@ -236,12 +236,21 @@ func TestAskedLevelMatchesSettingsHint(t *testing.T) {
 // принимать каждую строку и выбрасывать её после разбора — ровно та работа,
 // которую эта линия правок убирает.
 func TestLogForwarder_DisabledLoggingAsksForNothing(t *testing.T) {
-	// gateLogger с порогом, при котором Visible ложен для ВСЕХ уровней,
-	// изображает выключенный журнал: ровно так ведёт себя logging.Service,
-	// когда IsEnabled() == false.
+	// Шлюз, не пропускающий ничего, — поток не нужен.
 	f := NewLogForwarder(func() string { return "unused" }, &disabledLogger{})
 	if got := f.desiredClashLevel(); got != "" {
 		t.Errorf("при выключенном журнале просим %q, ожидали пусто", got)
+	}
+}
+
+// Настоящий logging.Service при выключенном журнале пропускает только error
+// (F313): у движка просим ровно error, warn сокет не пересекает.
+func TestLogForwarder_ErrorsOnlyAsksForErrors(t *testing.T) {
+	s := logging.NewService(errorsOnlySettings{})
+	defer s.Stop()
+	f := NewLogForwarder(func() string { return "unused" }, s)
+	if got := f.desiredClashLevel(); got != "error" {
+		t.Errorf("при выключенном журнале просим %q, ожидали error", got)
 	}
 }
 
@@ -370,3 +379,12 @@ func TestLogForwarder_WatcherGoroutineStops(t *testing.T) {
 
 	goleak.VerifyNone(t, ignore)
 }
+
+// errorsOnlySettings — выключенный журнал для настоящего logging.Service.
+type errorsOnlySettings struct{}
+
+func (errorsOnlySettings) IsLoggingEnabled() bool    { return false }
+func (errorsOnlySettings) GetLoggingMaxAge() int     { return 1 }
+func (errorsOnlySettings) GetLogLevel() string       { return "debug" }
+func (errorsOnlySettings) GetAppMaxEntries() int     { return 10 }
+func (errorsOnlySettings) GetSingboxMaxEntries() int { return 10 }

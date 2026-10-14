@@ -638,7 +638,7 @@
   <div class="terminal-loading">
     <LoadingSpinner size="lg" message={m.diag_logs_loading()} />
   </div>
-{:else if !$enabledStore}
+{:else if !$enabledStore && $statsStore.size === 0 && $activeStore.length === 0}
   <div class="terminal-empty">
     <EmptyState
       title={m.diag_logs_disabled_title()}

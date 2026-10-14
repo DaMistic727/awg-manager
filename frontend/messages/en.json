@@ -222,7 +222,7 @@
 	"settings_dnsroute_interval_hint": "6 to 24 hours is recommended",
 	"settings_dnsroute_daily_hint": "Router local time",
 	"settings_logging_label": "Logging",
-	"settings_logging_description": "Record application events in memory for debugging and auditing.",
+	"settings_logging_description": "Record application events in memory for debugging and auditing. Errors are recorded even when logging is off.",
 	"settings_logging_hours_option": "{hours} h",
 	"settings_logging_awgm_level_label": "AWGM log level",
 	"settings_logging_awgm_level_description": "INFO — operation results. FULL — intermediate steps and sing-box debug lines. DEBUG — full detail, including engine trace.",
