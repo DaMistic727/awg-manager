@@ -726,8 +726,13 @@ func TestEnsureWG_RenameSyncsDescriptionBeforeStart(t *testing.T) {
 		Peer: storage.AWGPeer{PublicKey: "srvkey=", Endpoint: "127.0.0.1:9000"},
 	}}
 
-	h.EnsureWGTunnel(httptest.NewRecorder(), post(t, ``), rec.Key())
+	rr := httptest.NewRecorder()
+	h.EnsureWGTunnel(rr, post(t, ``), rec.Key())
 
+	// F521: ответ несёт записанное имя, а не снятое до переименования.
+	if data, msg, code := decodeEnvelope(t, rr); code != "" || data["tunnelName"] != "Германия wdtt" {
+		t.Fatalf("ответ: %v (%s %s), ждали tunnelName «Германия wdtt»", data, code, msg)
+	}
 	if len(tunnels.described) != 1 || tunnels.described[0] != (describeCall{"old", "Старое имя", "Германия wdtt"}) {
 		t.Fatalf("описание записи: %+v", tunnels.described)
 	}

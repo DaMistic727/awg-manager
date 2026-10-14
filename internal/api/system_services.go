@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
 	"github.com/hoaxisr/awg-manager/internal/response"
 	"github.com/hoaxisr/awg-manager/internal/sys/services"
@@ -65,11 +66,13 @@ func (h *SystemToolsHandler) ServicesAction(w http.ResponseWriter, r *http.Reque
 	}
 	out, err := h.services.RunAction(req.Script, req.Action)
 	if err != nil {
-		h.emitFailure(req.Action, req.Script, err.Error())
+		h.emitFailure(req.Action, scriptSubject(req.Script), err.Error())
 		response.Success(w, SystemServiceActionData{Output: out, OK: false, Error: err.Error()})
 		return
 	}
-	h.emitEvent(req.Action, req.Script, out)
+	// Субъект — имя скрипта: save шлёт голое имя, action — путь, и одна
+	// служба в журнале и SSE выглядела по-разному (F300).
+	h.emitEvent(req.Action, scriptSubject(req.Script), out)
 	response.Success(w, SystemServiceActionData{Output: out, OK: true})
 }
 
@@ -185,7 +188,7 @@ func (h *SystemToolsHandler) ServicesDeleteScript(w http.ResponseWriter, r *http
 		return
 	}
 
-	h.emitEvent("delete", req.Script, "service deleted")
+	h.emitEvent("delete", scriptSubject(req.Script), "service deleted")
 	response.Success(w, SystemOKFlagData{OK: true})
 }
 
@@ -237,10 +240,19 @@ func (h *SystemToolsHandler) ServicesToggleEnable(w http.ResponseWriter, r *http
 		return
 	}
 
-	h.emitEvent("toggle_enable", req.Script, fmt.Sprintf("enabled=%v newPath=%s", *req.Enabled, newScript))
+	h.emitEvent("toggle_enable", scriptSubject(req.Script), fmt.Sprintf("enabled=%v newPath=%s", *req.Enabled, newScript))
 	response.Success(w, SystemServiceToggleEnableData{
 		OK:        true,
 		NewScript: newScript,
 		Enabled:   *req.Enabled,
 	})
+}
+
+// scriptSubject — субъект события службы: имя скрипта, как у save, а не
+// присланный путь (F300). Пустое остаётся пустым (filepath.Base дал бы «.»).
+func scriptSubject(script string) string {
+	if script == "" {
+		return ""
+	}
+	return filepath.Base(script)
 }

@@ -131,40 +131,6 @@ func tryStartAwgTunnel(ctx context.Context, svc TunnelService, th *TunnelsHandle
 	return nil
 }
 
-func syncLinkedAwgTunnelNames(
-	ctx context.Context,
-	store *storage.AWGTunnelStore,
-	th *TunnelsHandler,
-	pred linkedTunnelPredicate,
-	newName string,
-) (renamed []string, errs []string) {
-	newName = strings.TrimSpace(newName)
-	if store == nil || newName == "" {
-		return nil, nil
-	}
-	tunnels, err := listLinkedAwgTunnels(store, pred)
-	if err != nil {
-		return nil, []string{err.Error()}
-	}
-	for _, tun := range tunnels {
-		if tun.Name == newName {
-			continue
-		}
-		if err := store.Update(tun.ID, func(t *storage.AWGTunnel) error {
-			t.Name = newName
-			return nil
-		}); err != nil {
-			errs = append(errs, fmt.Sprintf("%s (%s): %v", tun.Name, tun.ID, err))
-			continue
-		}
-		renamed = append(renamed, tun.ID)
-	}
-	if th != nil && len(renamed) > 0 {
-		th.publishTunnelList(ctx)
-	}
-	return renamed, errs
-}
-
 func clientStartStopResponse(message string, tunnelIDs []string, tunnelErrors []string) map[string]any {
 	resp := map[string]any{"message": message}
 	if len(tunnelIDs) > 0 {

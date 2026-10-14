@@ -162,11 +162,17 @@ func TestServicesAction_FailureEmitsWarnNotSuccess(t *testing.T) {
 		t.Fatalf("контракт 200+ok:false нарушен: %d %s", rec.Code, rec.Body.String())
 	}
 	evs := p.events("system:tool-action")
-	if len(evs) != 1 || evs[0]["ok"] != "false" || evs[0]["action"] != "start" || evs[0]["error"] == "" {
+	if len(evs) != 1 || evs[0]["ok"] != "false" || evs[0]["action"] != "start" || evs[0]["error"] == "" || evs[0]["subject"] != "S99missing" {
 		t.Fatalf("события = %v", evs)
 	}
 	if len(spy.entries) != 1 || !strings.HasPrefix(spy.entries[0], "warn|start|") {
 		t.Fatalf("журнал = %v", spy.entries)
+	}
+
+	// Пустое имя — пустой субъект, а не «.» от filepath.Base (F300).
+	postJSON(t, h.ServicesAction, "/system/services/action", map[string]any{"script": "", "action": "start"})
+	if evs := p.events("system:tool-action"); len(evs) != 1 || evs[0]["subject"] != "" {
+		t.Fatalf("события = %v", evs)
 	}
 }
 
@@ -186,7 +192,8 @@ func TestServicesAction_SuccessEmitsInfoEvent(t *testing.T) {
 		t.Fatal(rec.Body.String())
 	}
 	evs := p.events("system:tool-action")
-	if len(evs) != 1 || evs[0]["ok"] != "" || evs[0]["details"] != "started" {
+	// F300: субъект — имя скрипта, как у save, а не присланный путь.
+	if len(evs) != 1 || evs[0]["ok"] != "" || evs[0]["details"] != "started" || evs[0]["subject"] != "S50ok" {
 		t.Fatalf("события = %v", evs)
 	}
 	if len(spy.entries) != 1 || !strings.HasPrefix(spy.entries[0], "info|start|") {

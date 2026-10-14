@@ -486,10 +486,16 @@ func (h *Handler) EnsureWGTunnel(w http.ResponseWriter, r *http.Request, key str
 			_ = h.deps.Tunnels.Start(r.Context(), match.ID)
 			mutated = true
 		}
+		// Имя — записанное: match снят до переименования, и UI показал бы
+		// прежнее до перечитывания (F521).
+		name := match.Name
+		if renamed {
+			name = wantName
+		}
 		response.Success(w, EnsureWGTunnelResponse{
 			Created:    false,
 			TunnelID:   match.ID,
-			TunnelName: match.Name,
+			TunnelName: name,
 			Message:    "AWG-туннель с таким WireGuard-конфигом уже существует",
 		})
 		return

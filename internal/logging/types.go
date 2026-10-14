@@ -121,7 +121,7 @@ var KnownSubgroups = map[string][]string{
 		SubAWGOutbounds,
 	},
 	GroupServer: {
-		SubHTTP, SubManaged,
+		SubHTTP, SubManaged, SubWan, // wan — ServersHandler (F289)
 	},
 	GroupSystem: {
 		SubBoot, SubAuth, SubMcp, SubSettings, SubUpdate, SubWan, SubSystemTunnel,
