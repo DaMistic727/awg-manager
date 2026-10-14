@@ -391,6 +391,18 @@ func (s *ServiceImpl) Update(ctx context.Context, oldStored, newStored *storage.
 		stateInfo = s.state.GetState(ctx, tunnelID)
 	}
 	if !shouldSyncRuntime(newStored, stateInfo) {
+		// Ключ и пир NativeWG живут в конфигурации интерфейса NDMS, а Start
+		// их не шлёт (только адрес, DNS, ASC, endpoint) — правка на
+		// остановленном туннеле иначе осталась бы только в записи (F650).
+		// Сюда же попадают Starting/Broken без обфускатора: им уходят только
+		// ключ и пир, прочее — до перезапуска (F658).
+		if s.isNativeWG(newStored) && s.nwgOperator != nil {
+			if err := s.withTunnelLock(ctx, tunnelID, "update", func() error {
+				return s.syncKeyAndPeer(ctx, oldStored, newStored)
+			}); err != nil {
+				return err
+			}
+		}
 		s.logInfo("update", tunnelID, "Tunnel updated (not running, runtime sync skipped)")
 		return nil
 	}
@@ -565,6 +577,20 @@ func (s *ServiceImpl) applyDiffNWG(ctx context.Context, oldStored, newStored *st
 			s.logWarn("update", tunnelID, "Failed to stop on path switch: "+err.Error())
 			return fmt.Errorf("stop on path switch: %w", err)
 		}
+		// Start применяет адрес, DNS, ASC и endpoint, но не приватный ключ и
+		// не поля пира: правка, сменившая их вместе с путём, иначе осталась бы
+		// только в записи (F650). Досылаем ПОСЛЕ Stop: до него при переходе
+		// proxy → ASC настоящий endpoint встал бы на ещё живой proxy-путь, и
+		// рукопожатия ушли бы без обфускации. Отказ (резолв при смене ключа
+		// пира — до любой отправки, см. syncKeyAndPeer) возвращает туннель на
+		// прежнюю запись: handler fail-closed её и не сменит.
+		if err := s.syncKeyAndPeer(ctx, oldStored, newStored); err != nil {
+			if sErr := s.nwgOperator.Start(ctx, oldStored); sErr != nil {
+				s.logWarn("update", tunnelID, "Failed to restore tunnel after key/peer sync failure: "+sErr.Error())
+				return errors.Join(err, fmt.Errorf("restore after failed sync: %w", sErr))
+			}
+			return err
+		}
 		if err := s.nwgOperator.Start(ctx, newStored); err != nil {
 			s.logWarn("update", tunnelID, "Failed to start on path switch: "+err.Error())
 			return fmt.Errorf("start on path switch: %w", err)
@@ -675,6 +701,45 @@ func (s *ServiceImpl) applyDiffNWG(ctx context.Context, oldStored, newStored *st
 	}
 
 	return errors.Join(errs...)
+}
+
+// syncKeyAndPeer — приватный ключ и пир NativeWG, если правка их меняет.
+// Start ни ключа, ни пира не шлёт (F650), поэтому досылаются они там, где
+// посинхронной правки нет: на остановленном туннеле и на смене пути
+// (ASC ↔ awg_proxy, Stop+Start). Интерфейса в NDMS нет — слать некуда и не
+// нужно: правка остановленного туннеля не должна от этого отказывать.
+func (s *ServiceImpl) syncKeyAndPeer(ctx context.Context, oldStored, newStored *storage.AWGTunnel) error {
+	keyChanged := oldStored.Interface.PrivateKey != newStored.Interface.PrivateKey
+	peerChanged := !awgPeerEqual(oldStored.Peer, newStored.Peer)
+	if !keyChanged && !peerChanged {
+		return nil
+	}
+	iface, err := s.nwgOperator.RequireIface(ctx, newStored)
+	if errors.Is(err, tunnel.ErrInterfaceGone) {
+		s.logInfo("update", newStored.ID, "NDMS sync of key/peer skipped: interface absent")
+		return nil
+	}
+	if err != nil {
+		s.logWarn("update", newStored.ID, "NDMS sync of key/peer: "+err.Error())
+		return err
+	}
+	// Пир первым: его ожидаемый отказ (резолв при смене ключа пира) случается
+	// до любой отправки, и тогда приватный ключ тоже не уходит — роутер и
+	// запись не расходятся. Сбой самого RCI-батча после этого может оставить
+	// частичное состояние, как и в посинхронной правке.
+	if peerChanged {
+		if err := s.nwgOperator.SyncPeer(ctx, iface, newStored, oldStored.Peer.PublicKey); err != nil {
+			s.logWarn("update", newStored.ID, "Failed to sync NWG peer: "+err.Error())
+			return fmt.Errorf("sync peer: %w", err)
+		}
+	}
+	if keyChanged {
+		if err := s.nwgOperator.SyncPrivateKey(ctx, iface, newStored); err != nil {
+			s.logWarn("update", newStored.ID, "Failed to sync NWG private-key: "+err.Error())
+			return fmt.Errorf("sync private-key: %w", err)
+		}
+	}
+	return nil
 }
 
 // awgInterfaceEqual returns true when two AWGInterface structs are
