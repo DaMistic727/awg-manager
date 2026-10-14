@@ -34,6 +34,11 @@ var (
 	// ErrValidateConf — .conf разобран, но параметры AWG отвергнуты.
 	ErrValidateConf = errors.New("validate conf")
 
+	// ErrPathSwitchNotRunning — правка меняет путь NativeWG (ASC ↔ awg_proxy),
+	// а туннель не работает: смена пути — это Stop+Start, а у туннеля без
+	// рукопожатия он мог быть подвешен на WAN-down (F658).
+	ErrPathSwitchNotRunning = errors.New("правка меняет путь туннеля (ASC ↔ awg_proxy), а туннель сейчас не подключён — запустите его или дождитесь подключения и повторите")
+
 	// ErrAddressInUse indicates the tunnel address is already assigned to a system interface.
 	ErrAddressInUse = errors.New("address already in use")
 

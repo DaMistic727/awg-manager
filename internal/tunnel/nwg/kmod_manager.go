@@ -731,6 +731,19 @@ func (km *KmodManager) isLoadedLocked() bool {
 	return km.isLoadedFn()
 }
 
+// HasKmodSlot — стоит ли kmod-слот туннеля. Правка карточки пересобирает
+// только существующий слот (F658): его нет — туннель подвешен (SuspendProxy)
+// или не поднят, и слот строит Start.
+func (o *OperatorNativeWG) HasKmodSlot(tunnelID string) bool { return o.kmod.HasTunnel(tunnelID) }
+
+// TrackKmodSlotForTest помечает слот туннеля существующим — для тестов вне
+// пакета, где /proc/awg_proxy нет.
+func (o *OperatorNativeWG) TrackKmodSlotForTest(tunnelID string) {
+	o.kmod.mu.Lock()
+	defer o.kmod.mu.Unlock()
+	o.kmod.tunnels[tunnelID] = kmodEntry{}
+}
+
 // HasTunnel checks if a tunnel is tracked.
 func (km *KmodManager) HasTunnel(tunnelID string) bool {
 	km.mu.Lock()

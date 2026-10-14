@@ -433,6 +433,11 @@ func (h *TunnelsHandler) Update(w http.ResponseWriter, r *http.Request) {
 			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "OPERATION_IN_PROGRESS")
 			return
 		}
+		if errors.Is(err, tunnel.ErrPathSwitchNotRunning) {
+			// Карточка цела, повтор после подключения пройдёт (F658).
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "PATH_SWITCH_NOT_RUNNING")
+			return
+		}
 		h.log.Warn("update", merged.Name, "Service update failed: "+err.Error())
 		response.Error(w, err.Error(), "UPDATE_FAILED")
 		return

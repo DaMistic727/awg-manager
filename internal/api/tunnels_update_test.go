@@ -534,6 +534,27 @@ func TestTunnelUpdate_KeepsConcurrentRuntimeWrites(t *testing.T) {
 	}
 }
 
+// Отказ смены пути у неподключённого NativeWG — 409 со своим кодом: карточка
+// цела, повтор после подключения пройдёт; запись не тронута (F658).
+func TestTunnelUpdate_PathSwitchNotRunningIs409(t *testing.T) {
+	stub := &stubTunnelSvc{updateFn: func(context.Context, *storage.AWGTunnel, *storage.AWGTunnel) error {
+		return tunnel.ErrPathSwitchNotRunning
+	}}
+	h, store := newTunnelsUpdateHarness(t, stub)
+	if err := store.Create(&storage.AWGTunnel{ID: "awg10", Name: "прежнее"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	h.Update(rr, httptest.NewRequest(http.MethodPost, "/tunnels/update?id=awg10",
+		strings.NewReader(`{"name":"новое"}`)))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "PATH_SWITCH_NOT_RUNNING") {
+		t.Fatalf("код %d, тело: %s", rr.Code, rr.Body.String())
+	}
+	if got, _ := store.Get("awg10"); got.Name != "прежнее" {
+		t.Fatalf("запись изменена при отказе: %q", got.Name)
+	}
+}
+
 // Issue #795: занятый пер-туннельный замок — ретраибельный конфликт, а не
 // провал удаления. 500 фронт показывает как фатальную «Ошибка удаления
 // (500)», хотя повтор через несколько секунд проходит. start/stop/restart

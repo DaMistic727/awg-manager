@@ -77,6 +77,7 @@ func TestApplyDiffNWG_WithKmodSlot_OneList(t *testing.T) {
 	upd := *old
 	upd.Interface.AWGObfuscation.Jc = 5 // kmodShapingChanged → SyncKmodSlot
 
+	op.TrackKmodSlotForTest("awg20") // живой туннель: слот есть
 	lists := f.ListCalls()
 	err := s.applyDiffNWG(context.Background(), old, &upd)
 	// Слот на хосте теста не собирается (/proc/awg_proxy нет): ошибка шага
@@ -89,6 +90,24 @@ func TestApplyDiffNWG_WithKmodSlot_OneList(t *testing.T) {
 	}
 	if f.E != 0 || f.Phantoms != 0 {
 		t.Fatalf("E=%d phantoms=%d", f.E, f.Phantoms)
+	}
+}
+
+// Слота нет — туннель подвешен на WAN-down (SuspendProxy снял слот) или не
+// поднят: правка карточки слот не воскрешает, это дело Start (F658). С
+// пересборкой правка шла бы в kmod — на хосте теста это «kmod add».
+func TestApplyDiffNWG_NoSlotSkipsRebuild(t *testing.T) {
+	op, _, _ := nwgOnOracle(t)
+	s := &ServiceImpl{state: NewMockStateManager(), nwgOperator: op}
+	old := &storage.AWGTunnel{ID: "awg20", Backend: "nativewg",
+		Interface: storage.AWGInterface{Address: "10.0.0.1/32", MTU: 1420,
+			AWGObfuscation: storage.AWGObfuscation{Jc: 4, Jmin: 40, Jmax: 70}},
+		Peer: storage.AWGPeer{PublicKey: "pk", Endpoint: "198.51.100.1:51820"}}
+	upd := *old
+	upd.Interface.AWGObfuscation.Jc = 5 // kmodShapingChanged
+
+	if err := s.applyDiffNWG(context.Background(), old, &upd); err != nil {
+		t.Fatalf("правка без слота: %v", err)
 	}
 }
 
@@ -106,6 +125,7 @@ func TestApplyDiffNWG_WritesThenKmodSlot_TwoLists(t *testing.T) {
 	upd.Interface.DNS = "9.9.9.9"
 	upd.Peer.Endpoint = "198.51.100.2:51820" // kmodShapingChanged → SyncKmodSlot
 
+	op.TrackKmodSlotForTest("awg20") // живой туннель: слот есть
 	lists := f.ListCalls()
 	err := s.applyDiffNWG(context.Background(), old, &upd)
 	if err == nil || !strings.Contains(err.Error(), "kmod add") {

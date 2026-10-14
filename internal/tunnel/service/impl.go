@@ -387,24 +387,30 @@ func (s *ServiceImpl) Update(ctx context.Context, oldStored, newStored *storage.
 		}
 	}
 
-	// Description rename — cheap, dispatch on change.
-	if oldStored.Name != newStored.Name {
-		s.syncDescription(ctx, "update", newStored, oldStored.Name, newStored.Name)
-	}
-
-	// Below this point we only act on the running interface. Skip if not.
+	// Состояние — до любой записи в NDMS: отказ смены пути (F658) обязан
+	// случиться раньше переименования ниже, иначе описание в NDMS уехало бы
+	// на новое имя, а запись осталась бы прежней.
 	var stateInfo tunnel.StateInfo
 	if s.isNativeWG(newStored) && s.nwgOperator != nil {
 		stateInfo = s.nwgOperator.GetState(ctx, newStored)
 	} else {
 		stateInfo = s.state.GetState(ctx, tunnelID)
 	}
+	pathSwitch := nwg.UsesProxyPath(&oldStored.Interface) != nwg.UsesProxyPath(&newStored.Interface)
+	if refusePathSwitch(newStored, stateInfo, pathSwitch) {
+		return tunnel.ErrPathSwitchNotRunning
+	}
+
+	// Description rename — cheap, dispatch on change.
+	if oldStored.Name != newStored.Name {
+		s.syncDescription(ctx, "update", newStored, oldStored.Name, newStored.Name)
+	}
+
+	// Below this point we only act on the running interface. Skip if not.
 	if !shouldSyncRuntime(newStored, stateInfo) {
 		// Ключ и пир NativeWG живут в конфигурации интерфейса NDMS, а Start
 		// их не шлёт (только адрес, DNS, ASC, endpoint) — правка на
 		// остановленном туннеле иначе осталась бы только в записи (F650).
-		// Сюда же попадают Starting/Broken без обфускатора: им уходят только
-		// ключ и пир, прочее — до перезапуска (F658).
 		if s.isNativeWG(newStored) && s.nwgOperator != nil {
 			if err := s.withTunnelLock(ctx, tunnelID, "update", func() error {
 				return s.syncKeyAndPeer(ctx, oldStored, newStored)
@@ -438,19 +444,31 @@ func (s *ServiceImpl) Update(ctx context.Context, oldStored, newStored *storage.
 	return nil
 }
 
-// shouldSyncRuntime — пускать ли правку в живой интерфейс. Обычный туннель
-// синхронизируется только запущенным. У обфусцированного правка обязана
-// доехать до релея и без рукопожатия: без ASC такой туннель висит в Starting
-// (PeerRemoteAddr=127.0.0.1 при живом релее), с ASC уезжает в Broken, а
-// упавший релей даёт Broken с DetailsNotRunning — во всех трёх случаях
-// «Сохранить» с новым ключом обязано перезапустить релей, иначе туннель
-// лечится только ручным рестартом (Q21). Набор состояний — как у
-// ReplaceConfig.
+// shouldSyncRuntime — пускать ли правку в живой интерфейс. Kernel-туннель
+// синхронизируется только запущенным. У NativeWG Starting и Broken — это
+// conf=running без рукопожатия: интерфейс NDMS поднят, и правка обязана
+// доехать целиком — частый случай как раз починка неверного ключа у туннеля,
+// который не может сделать рукопожатие (решение владельца 14.10, F658). Для
+// обфусцированного это же нужно релею: без ASC он висит в Starting, с ASC и
+// при упавшем релее — Broken, и «Сохранить» с новым ключом обязано его
+// перезапустить (Q21). Набор состояний — как у ReplaceConfig.
 func shouldSyncRuntime(stored *storage.AWGTunnel, stateInfo tunnel.StateInfo) bool {
 	if stateInfo.State == tunnel.StateRunning {
 		return true
 	}
-	return stored.Obfuscator != nil &&
+	return (stored.Backend == "nativewg" || stored.Obfuscator != nil) &&
+		(stateInfo.State == tunnel.StateStarting || stateInfo.State == tunnel.StateBroken)
+}
+
+// refusePathSwitch — правку, меняющую путь ASC ↔ awg_proxy (это Stop+Start),
+// у обычного NativeWG в Starting/Broken отклонить (решение владельца 14.10,
+// F658): такой туннель мог быть подвешен на WAN-down (SuspendProxy, conf
+// остался running → Broken) — перезапуск обошёл бы приостановку, а
+// отложенная смена разводила бы кэш оркестратора и NDMS. Остановленный идёт
+// прежней веткой (ключ и пир, путь — со стартом); запущенный и
+// обфусцированный перезапускаются, как прежде.
+func refusePathSwitch(newStored *storage.AWGTunnel, stateInfo tunnel.StateInfo, pathSwitch bool) bool {
+	return pathSwitch && newStored.Backend == "nativewg" && newStored.Obfuscator == nil &&
 		(stateInfo.State == tunnel.StateStarting || stateInfo.State == tunnel.StateBroken)
 }
 
@@ -704,7 +722,12 @@ func (s *ServiceImpl) applyDiffNWG(ctx context.Context, oldStored, newStored *st
 	//
 	// У обфусцированного туннеля kmod-слота нет по построению: пир смотрит на
 	// loopback, и слот увёл бы WG в awg_proxy мимо релея.
-	if newStored.Obfuscator == nil {
+	//
+	// Пересобирается только существующий слот: его нет — туннель подвешен
+	// на WAN-down (SuspendProxy снял слот, conf остался running → Broken) или
+	// не поднят, и слот строит Start. Иначе «Сохранить» у Starting/Broken
+	// (F658) обходило бы приостановку, а без связи падало бы на резолве.
+	if newStored.Obfuscator == nil && s.nwgOperator.HasKmodSlot(newStored.ID) {
 		if kmodShapingChanged(oldStored, newStored) {
 			if err := s.nwgOperator.SyncKmodSlot(ctx, newStored); err != nil {
 				s.logWarn("update", tunnelID, "Failed to sync kmod slot: "+err.Error())

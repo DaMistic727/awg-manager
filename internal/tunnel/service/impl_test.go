@@ -620,11 +620,13 @@ func TestNew_NativeWGStateWiring(t *testing.T) {
 
 // Правка обфусцированного туннеля обязана доехать до релея и без рукопожатия:
 // без ASC такой туннель висит в Starting, с ASC уезжает в Broken, упавший
-// релей — тоже Broken. Обычный туннель по-прежнему синхронизируется только
-// запущенным (Q21).
+// релей — тоже Broken (Q21). NativeWG без рукопожатия (Starting/Broken —
+// интерфейс NDMS поднят) синхронизируется целиком (F658); kernel — только
+// запущенным.
 func TestShouldSyncRuntime(t *testing.T) {
 	obf := &storage.AWGTunnel{Obfuscator: &storage.Obfuscator{Flavor: storage.ObfuscatorFlavorPhobos}}
-	plain := &storage.AWGTunnel{}
+	plain := &storage.AWGTunnel{Backend: "kernel"}
+	nwg := &storage.AWGTunnel{Backend: "nativewg"}
 	cases := []struct {
 		name   string
 		stored *storage.AWGTunnel
@@ -635,6 +637,11 @@ func TestShouldSyncRuntime(t *testing.T) {
 		{"обычный Starting", plain, tunnel.StateStarting, false},
 		{"обычный Broken", plain, tunnel.StateBroken, false},
 		{"обычный Stopped", plain, tunnel.StateStopped, false},
+		{"NativeWG Running", nwg, tunnel.StateRunning, true},
+		{"NativeWG Starting", nwg, tunnel.StateStarting, true},
+		{"NativeWG Broken", nwg, tunnel.StateBroken, true},
+		{"NativeWG Unknown", nwg, tunnel.StateUnknown, false},
+		{"NativeWG Stopped", nwg, tunnel.StateStopped, false},
 		{"обфускатор Running", obf, tunnel.StateRunning, true},
 		{"обфускатор Starting", obf, tunnel.StateStarting, true},
 		{"обфускатор Broken", obf, tunnel.StateBroken, true},
@@ -647,6 +654,32 @@ func TestShouldSyncRuntime(t *testing.T) {
 				t.Errorf("shouldSyncRuntime(%v) = %v, want %v", c.state, got, c.want)
 			}
 		})
+	}
+}
+
+// Смена пути у обычного NativeWG без рукопожатия отклоняется: он мог быть
+// подвешен на WAN-down, и Stop+Start обошёл бы приостановку (F658).
+// Остановленный идёт прежней веткой, запущенный и обфусцированный — как раньше.
+func TestRefusePathSwitch(t *testing.T) {
+	plain := &storage.AWGTunnel{Backend: "nativewg"}
+	obf := &storage.AWGTunnel{Backend: "nativewg", Obfuscator: &storage.Obfuscator{Flavor: storage.ObfuscatorFlavorPhobos}}
+	for _, c := range []struct {
+		name    string
+		stored  *storage.AWGTunnel
+		state   tunnel.State
+		switch_ bool
+		want    bool
+	}{
+		{"обычный Broken, смена пути", plain, tunnel.StateBroken, true, true},
+		{"обычный Starting, смена пути", plain, tunnel.StateStarting, true, true},
+		{"обычный Running, смена пути", plain, tunnel.StateRunning, true, false},
+		{"обычный Stopped, смена пути", plain, tunnel.StateStopped, true, false},
+		{"обычный Broken, путь тот же", plain, tunnel.StateBroken, false, false},
+		{"обфусцированный Broken, смена пути", obf, tunnel.StateBroken, true, false},
+	} {
+		if got := refusePathSwitch(c.stored, tunnel.StateInfo{State: c.state}, c.switch_); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 
