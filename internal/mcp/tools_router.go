@@ -45,15 +45,9 @@ type outboundDetailOut struct {
 // pageOutboundDetail cuts one page of members. An offset past the end
 // yields an empty page rather than an error.
 func pageOutboundDetail(detail SingboxOutboundDetail, offset int) outboundDetailOut {
-	total := len(detail.Members)
-	start := min(offset, total)
-	end := min(start+MaxGroupMembersInOutput, total)
-	page := detail.Members[start:end:end]
-	if page == nil {
-		page = []SingboxGroupMember{}
-	}
-	out := outboundDetailOut{SingboxOutbound: detail.SingboxOutbound, Members: page, MembersOffset: start, MembersTruncated: end < total, HasDraft: detail.HasDraft}
-	out.MemberCount = total
+	page, start, truncated := pageOf(detail.Members, offset, MaxGroupMembersInOutput)
+	out := outboundDetailOut{SingboxOutbound: detail.SingboxOutbound, Members: page, MembersOffset: start, MembersTruncated: truncated, HasDraft: detail.HasDraft}
+	out.MemberCount = len(detail.Members)
 	return out
 }
 
@@ -85,9 +79,7 @@ func registerRouterTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List sing-box rules"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, rulesOut, error) {
 		rules, hasDraft, err := d.ListSingboxRules(ctx)
-		if rules == nil {
-			rules = []SingboxRule{}
-		}
+		rules = orEmpty(rules)
 		return nil, rulesOut{Rules: rules, HasDraft: hasDraft}, err
 	})
 
@@ -101,9 +93,7 @@ func registerRouterTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List sing-box outbounds"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, outboundsOut, error) {
 		list, hasDraft, err := d.ListSingboxOutbounds(ctx)
-		if list == nil {
-			list = []SingboxOutbound{}
-		}
+		list = orEmpty(list)
 		return nil, outboundsOut{Outbounds: list, HasDraft: hasDraft}, err
 	})
 

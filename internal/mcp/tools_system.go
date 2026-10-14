@@ -67,9 +67,7 @@ func registerSystemTools(s *mcp.Server, d Deps) {
 			}
 		}
 		entries, total, err := d.GetLogs(ctx, q)
-		if entries == nil {
-			entries = []LogEntry{}
-		}
+		entries = orEmpty(entries)
 		return nil, logsOut{Total: total, Entries: entries}, err
 	})
 
@@ -119,9 +117,7 @@ func registerSystemTools(s *mcp.Server, d Deps) {
 		Annotations: safeWrite("Run ping check now", true),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, PingCheckRun, error) {
 		run, err := d.RunPingCheck(ctx)
-		if run.Tunnels == nil {
-			run.Tunnels = []PingCheckStatus{}
-		}
+		run.Tunnels = orEmpty(run.Tunnels)
 		return nil, run, err
 	})
 }

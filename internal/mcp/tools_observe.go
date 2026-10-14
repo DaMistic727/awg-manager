@@ -69,9 +69,7 @@ func registerObservabilityTools(s *mcp.Server, d Deps) {
 			in.Limit = MaxConnectionsInOutput
 		}
 		list, total, err := d.ListConnections(ctx, ConnectionsQuery{TunnelID: in.TunnelID, ClientIP: clientIP, Limit: in.Limit})
-		if list == nil {
-			list = []Connection{}
-		}
+		list = orEmpty(list)
 		return nil, connectionsOut{Connections: list, Total: total}, err
 	})
 
@@ -93,9 +91,7 @@ func registerObservabilityTools(s *mcp.Server, d Deps) {
 			in.Limit = MaxPingCheckLogEntries
 		}
 		entries, err := d.PingCheckLogs(ctx, in.TunnelID, in.Limit)
-		if entries == nil {
-			entries = []PingCheckLogEntry{}
-		}
+		entries = orEmpty(entries)
 		return nil, pingLogsOut{Entries: entries}, err
 	})
 
@@ -119,9 +115,7 @@ func registerObservabilityTools(s *mcp.Server, d Deps) {
 		if err != nil {
 			return nil, DiagnosticsResult{}, err
 		}
-		if out.Problems == nil {
-			out.Problems = []DiagnosticsProblem{}
-		}
+		out.Problems = orEmpty(out.Problems)
 		if out.Status == "running" {
 			// Said in text as well: a zero-count result with status
 			// "running" is easy to read as a clean sweep.

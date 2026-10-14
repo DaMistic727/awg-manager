@@ -18,9 +18,7 @@ func registerServerTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List managed servers"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, serversOut, error) {
 		list, err := d.ListManagedServers(ctx)
-		if list == nil {
-			list = []ManagedServer{}
-		}
+		list = orEmpty(list)
 		return nil, serversOut{Servers: list}, err
 	})
 }

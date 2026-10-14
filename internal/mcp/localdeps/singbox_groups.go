@@ -469,7 +469,7 @@ func (l *Local) SetSingboxSubscriptionEnabled(_ context.Context, id string, enab
 	// listed it, and the error should send it back to the list.
 	current, err := l.c.Subscriptions.Get(id)
 	if err != nil || current == nil {
-		return mcpsrv.SingboxSubscription{}, nil, fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
+		return mcpsrv.SingboxSubscription{}, nil, errSubscriptionNotFound(id)
 	}
 	// Read outside the service's per-subscription lock: Update reads the
 	// value again under it and does not return what it saw. If another
@@ -519,7 +519,7 @@ func (l *Local) switchFailure(id string, before, wanted bool) error {
 	after, err := l.c.Subscriptions.Get(id)
 	switch {
 	case err != nil || after == nil:
-		return fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
+		return errSubscriptionNotFound(id)
 	case after.Enabled != before:
 		return fmt.Errorf("the subscription is now STORED as %s, but applying that to sing-box failed and the previous value could not be restored. The stored setting and the running engine disagree, and the stored one takes effect when sing-box next reloads. Tell the user. %s", onOff(after.Enabled), where)
 	}
@@ -557,7 +557,7 @@ func (l *Local) SetSingboxSubscriptionMode(_ context.Context, id, mode string) (
 	}
 	current, err := l.c.Subscriptions.Get(id)
 	if err != nil || current == nil {
-		return mcpsrv.SingboxSubscription{}, fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
+		return mcpsrv.SingboxSubscription{}, errSubscriptionNotFound(id)
 	}
 	if current.EffectiveMode() == want {
 		return singboxSubscription(current), nil
@@ -585,7 +585,7 @@ func (l *Local) modeFailure(id string, before, wanted subscription.SubscriptionM
 	after, err := l.c.Subscriptions.Get(id)
 	switch {
 	case err != nil || after == nil:
-		return fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
+		return errSubscriptionNotFound(id)
 	case after.EffectiveMode() != before:
 		return fmt.Errorf("the subscription is now STORED in %s mode, but applying that to sing-box failed and the previous mode could not be restored. The stored setting and the running engine disagree, and the stored one takes effect when sing-box next reloads. Tell the user. %s", after.EffectiveMode(), where)
 	}
@@ -615,7 +615,7 @@ func (l *Local) SetSingboxSubscriptionActiveMember(ctx context.Context, id, memb
 	}
 	current, err := l.c.Subscriptions.Get(id)
 	if err != nil || current == nil {
-		return mcpsrv.SingboxSubscription{}, fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
+		return mcpsrv.SingboxSubscription{}, errSubscriptionNotFound(id)
 	}
 	if current.EffectiveMode() == subscription.ModeURLTest {
 		return mcpsrv.SingboxSubscription{}, fmt.Errorf("the subscription is in urltest mode: sing-box picks its server itself and a server cannot be chosen by hand. Switch it to selector with set_singbox_subscription_mode first")
@@ -654,9 +654,15 @@ func (l *Local) activeMemberFailure(id, label, memberTag, before string) error {
 	}
 	switch {
 	case err != nil || after == nil:
-		return fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
+		return errSubscriptionNotFound(id)
 	case stored:
 		return fmt.Errorf("the server is STORED as the active one, but switching the running sing-box failed, so the group may still route through the previous server. The stored choice is applied when the subscription's group is next rebuilt, for example by a refresh; a sing-box restart before that starts from the previous server. Tell the user. The cause is in the journal — get_logs with bucket \"singbox\"")
 	}
 	return fmt.Errorf("the server could not be chosen and the subscription is unchanged. A refresh or another client may have changed the subscription meanwhile: check it with list_singbox_subscriptions and get_singbox_outbound, then try again")
+}
+
+// errSubscriptionNotFound — отказ по неизвестному id подписки: одна
+// формулировка с подсказкой, какой инструмент даёт id.
+func errSubscriptionNotFound(id string) error {
+	return fmt.Errorf("sing-box subscription %q not found (use list_singbox_subscriptions)", id)
 }

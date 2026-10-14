@@ -328,12 +328,8 @@ func (d DNSRouteDetail) Summary() DNSRoute {
 	if len(out.Domains) > MaxDomainsInOutput {
 		out.Domains = out.Domains[:MaxDomainsInOutput:MaxDomainsInOutput]
 	}
-	if out.Domains == nil {
-		out.Domains = []string{}
-	}
-	if out.Routes == nil {
-		out.Routes = []RouteTarget{}
-	}
+	out.Domains = orEmpty(out.Domains)
+	out.Routes = orEmpty(out.Routes)
 	return out
 }
 
@@ -626,4 +622,23 @@ type PingCheckStatus struct {
 	Status      string `json:"status"`
 	Method      string `json:"method"`
 	LastLatency int    `json:"lastLatency"`
+}
+
+// pageOf — страница all с offset, не длиннее max: смещение за концом даёт
+// пустую страницу (агент, листающий страницы, останавливается на пустой),
+// трёхиндексный срез не даёт странице дорасти в остаток списка через append.
+func pageOf[T any](all []T, offset, max int) (page []T, start int, truncated bool) {
+	total := len(all)
+	start = min(offset, total)
+	end := min(start+max, total)
+	return orEmpty(all[start:end:end]), start, end < total
+}
+
+// orEmpty — пустой срез вместо nil: в JSON-ответе инструмента список
+// обязан быть [], а не null — модели нил-список выглядит как «поля нет».
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
 }

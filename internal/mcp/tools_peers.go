@@ -107,9 +107,7 @@ func registerPeerTools(s *mcp.Server, d Deps) {
 			return nil, peersOut{}, err
 		}
 		list, err := d.ListServerPeers(ctx, in.ServerID)
-		if list == nil {
-			list = []ServerPeer{}
-		}
+		list = orEmpty(list)
 		return nil, peersOut{ServerID: in.ServerID, Peers: list}, err
 	})
 

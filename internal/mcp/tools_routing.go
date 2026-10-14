@@ -77,22 +77,14 @@ type dnsRouteDetailOut struct {
 // pages should be able to stop on an empty result.
 func pageDNSRouteDetail(detail DNSRouteDetail, offset int) dnsRouteDetailOut {
 	total := len(detail.Domains)
-	start := min(offset, total)
-	end := min(start+MaxDomainsInDetail, total)
-	// Three-index slice: the page must not be able to grow into the rest
-	// of the list through an append somewhere downstream.
-	detail.Domains = detail.Domains[start:end:end]
-	if detail.Domains == nil {
-		detail.Domains = []string{}
-	}
-	if detail.Routes == nil {
-		detail.Routes = []RouteTarget{}
-	}
+	page, start, truncated := pageOf(detail.Domains, offset, MaxDomainsInDetail)
+	detail.Domains = page
+	detail.Routes = orEmpty(detail.Routes)
 	return dnsRouteDetailOut{
 		DNSRouteDetail:   detail,
 		DomainCount:      total,
 		DomainsOffset:    start,
-		DomainsTruncated: end < total,
+		DomainsTruncated: truncated,
 	}
 }
 
@@ -153,9 +145,7 @@ func registerRoutingTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List DNS routes"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, dnsRoutesOut, error) {
 		list, err := d.ListDNSRoutes(ctx)
-		if list == nil {
-			list = []DNSRoute{}
-		}
+		list = orEmpty(list)
 		return nil, dnsRoutesOut{Routes: list}, err
 	})
 
@@ -263,9 +253,7 @@ func registerRoutingTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List static routes"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, staticRoutesOut, error) {
 		list, err := d.ListStaticRoutes(ctx)
-		if list == nil {
-			list = []StaticRoute{}
-		}
+		list = orEmpty(list)
 		return nil, staticRoutesOut{Routes: list}, err
 	})
 
@@ -322,9 +310,7 @@ func registerRoutingTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List client routes"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, clientRoutesOut, error) {
 		list, err := d.ListClientRoutes(ctx)
-		if list == nil {
-			list = []ClientRoute{}
-		}
+		list = orEmpty(list)
 		return nil, clientRoutesOut{Routes: list}, err
 	})
 
@@ -381,9 +367,7 @@ func registerRoutingTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List access policies"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, policiesOut, error) {
 		list, err := d.ListAccessPolicies(ctx)
-		if list == nil {
-			list = []AccessPolicy{}
-		}
+		list = orEmpty(list)
 		return nil, policiesOut{Policies: list}, err
 	})
 
@@ -393,9 +377,7 @@ func registerRoutingTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List devices"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, devicesOut, error) {
 		list, err := d.ListDevices(ctx)
-		if list == nil {
-			list = []Device{}
-		}
+		list = orEmpty(list)
 		return nil, devicesOut{Devices: list}, err
 	})
 }

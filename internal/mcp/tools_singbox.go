@@ -56,9 +56,7 @@ func registerSingboxTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List sing-box proxies"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, singboxTunnelsOut, error) {
 		list, err := d.ListSingboxTunnels(ctx)
-		if list == nil {
-			list = []SingboxTunnel{}
-		}
+		list = orEmpty(list)
 		return nil, singboxTunnelsOut{Tunnels: list}, err
 	})
 

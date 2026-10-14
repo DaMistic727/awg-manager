@@ -100,9 +100,7 @@ func registerTunnelTools(s *mcp.Server, d Deps) {
 		Annotations: readOnly("List tunnels"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, tunnelsOut, error) {
 		list, err := d.ListTunnels(ctx)
-		if list == nil {
-			list = []TunnelSummary{}
-		}
+		list = orEmpty(list)
 		return nil, tunnelsOut{Tunnels: list}, err
 	})
 

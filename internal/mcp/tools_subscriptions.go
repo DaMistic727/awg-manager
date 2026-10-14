@@ -23,14 +23,8 @@ type subscriptionsOut struct {
 // pageSubscriptions cuts one page. An offset past the end yields an empty
 // page rather than an error: an agent walking the pages stops on it.
 func pageSubscriptions(all []SingboxSubscription, offset int) subscriptionsOut {
-	total := len(all)
-	start := min(offset, total)
-	end := min(start+MaxSubscriptionsInOutput, total)
-	page := all[start:end:end]
-	if page == nil {
-		page = []SingboxSubscription{}
-	}
-	return subscriptionsOut{Subscriptions: page, Total: total, Offset: start, Truncated: end < total}
+	page, start, truncated := pageOf(all, offset, MaxSubscriptionsInOutput)
+	return subscriptionsOut{Subscriptions: page, Total: len(all), Offset: start, Truncated: truncated}
 }
 
 type setSubscriptionEnabledIn struct {
