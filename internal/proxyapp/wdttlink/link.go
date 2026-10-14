@@ -131,9 +131,26 @@ func EncodeLinkWithClientPort(peer string, wgPort int, password string, vkHashes
 	if err != nil {
 		return "", err
 	}
-	payload := fmt.Sprintf("%s:%d:%d:%d:%s", host, dtlsPort, wgPort, clientListenPort, password)
-	if hashes := strings.Join(splitHashes(strings.Join(vkHashes, ",")), ","); hashes != "" {
-		payload += ":" + hashes
+	hashes := strings.Join(splitHashes(strings.Join(vkHashes, ",")), ",")
+	var payload string
+	if strings.Contains(host, ":") {
+		// Двоеточная форма разбирается по «:», и IPv6-хост в ней невыразим
+		// (parts[0] стал бы первой группой адреса). JSON-форму тот же импорт
+		// понимает (jsonWdttToPayload); для IPv4 и имён форма прежняя (F661).
+		raw, err := json.Marshal(map[string]any{
+			"peer": net.JoinHostPort(host, strconv.Itoa(dtlsPort)), "pass": password,
+			"hashes": hashes, "port": clientListenPort,
+			"workers": 16, // как у двоеточной формы (colonWdttToPayload)
+		})
+		if err != nil {
+			return "", err
+		}
+		payload = base64.StdEncoding.EncodeToString(raw)
+	} else {
+		payload = fmt.Sprintf("%s:%d:%d:%d:%s", host, dtlsPort, wgPort, clientListenPort, password)
+		if hashes != "" {
+			payload += ":" + hashes
+		}
 	}
 	link := SchemeWdtt + payload
 	if n := strings.TrimSpace(name); n != "" {

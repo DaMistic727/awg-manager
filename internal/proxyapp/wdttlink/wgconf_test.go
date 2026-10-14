@@ -122,3 +122,25 @@ func TestNormalizePeerIPv6(t *testing.T) {
 		t.Errorf("split = (%q, %d, %v), want (2001:db8::1, 56000)", host, port, err)
 	}
 }
+
+// F661: IPv6-хост двоеточная форма не переносит — ссылка собирается в
+// JSON-форме и разбирается нашим же импортом обратно в тот же peer; IPv4
+// остаётся двоеточным.
+func TestEncodeLinkIPv6RoundTrip(t *testing.T) {
+	link, err := EncodeLinkWithClientPort("[2001:db8::1]:56004", 56001, "secret", []string{"h1"}, "Дом", 9000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := parseWdttURI(link)
+	if err != nil {
+		t.Fatalf("разбор %q: %v", link, err)
+	}
+	if p.Peer != "[2001:db8::1]:56004" || p.Password != "secret" || p.Name != "Дом" ||
+		p.Listen != "127.0.0.1:9000" || p.Workers != 16 || len(p.VKHashes) != 1 || p.VKHashes[0] != "h1" {
+		t.Fatalf("payload = %+v", p)
+	}
+	v4, _ := EncodeLinkWithClientPort("1.2.3.4:56004", 56001, "secret", nil, "", 9000)
+	if v4 != "wdtt://1.2.3.4:56004:56001:9000:secret" {
+		t.Fatalf("IPv4-ссылка изменилась: %q", v4)
+	}
+}
