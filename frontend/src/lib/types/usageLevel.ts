@@ -117,6 +117,10 @@ export function isSectionVisible(level: UsageLevel, section: Section): boolean {
 	return LEVEL_RANK[level] >= LEVEL_RANK[SECTION_MIN_LEVEL[section]];
 }
 
+export function routingSubTabMinLevel(tab: RoutingSubTab): UsageLevel {
+	return ROUTING_SUBTAB_MIN_LEVEL[tab];
+}
+
 export function isRoutingSubTabVisible(level: UsageLevel, tab: RoutingSubTab): boolean {
 	return LEVEL_RANK[level] >= LEVEL_RANK[ROUTING_SUBTAB_MIN_LEVEL[tab]];
 }

@@ -5,6 +5,9 @@
 	import { describeRouterReference, type RouterReference } from '$lib/utils/tunnelRefs';
 	import { setMode } from '$lib/components/sb-router/modeStore';
 	import { m } from '$lib/i18n';
+	import { usageLevel } from '$lib/stores/settings';
+	import { singboxRouter } from '$lib/stores/singboxRouter';
+	import { isRoutingSubTabVisible, routingSubTabMinLevel, usageLevelLabel } from '$lib/types/usageLevel';
 
 	interface Props {
 		open: boolean;
@@ -21,6 +24,22 @@
 		fakeip: '/routing?tab=fakeip'
 	};
 
+	// Вкладки sing-box на «Маршрутизации» видны с уровня 'expert' (FakeIP —
+	// ещё и в режиме fakeip-tun). Ссылка на невидимую вкладку — тупик: Tabs не
+	// находит id и остаётся на вкладке по умолчанию (F640). Тогда вместо ссылки
+	// говорим, с какого уровня раздел доступен.
+	const routerSettings = singboxRouter.settings;
+	let tproxyVisible = $derived(isRoutingSubTabVisible($usageLevel, 'singboxRouter'));
+	let planeVisible = $derived<Record<RouterReference['plane'], boolean>>({
+		tproxy: tproxyVisible,
+		fakeip: tproxyVisible || $routerSettings?.routingMode === 'fakeip-tun'
+	});
+	// Режим движка нужен до захода на вкладки sing-box — тот же праймер, что у
+	// страницы «Маршрутизация».
+	$effect(() => {
+		if (open && !$routerSettings) void singboxRouter.reloadSettings();
+	});
+
 	// DNS-серверы и группы TProxy видны только в экспертном режиме; ?mode=
 	// modeStore читает лишь при загрузке, поэтому режим ставим после перехода.
 	async function openPlane(e: MouseEvent, plane: RouterReference['plane']) {
@@ -30,6 +49,14 @@
 		if (plane === 'tproxy') setMode('expert');
 	}
 </script>
+
+{#snippet openLink(plane: RouterReference['plane'])}
+	{#if planeVisible[plane]}
+		<a href={PLANE_HREF[plane]} onclick={(e) => openPlane(e, plane)}>{m.tunnels_referenced_open()}</a>
+	{:else}
+		<span class="level-note">{m.tunnels_referenced_needs_level({ level: usageLevelLabel(routingSubTabMinLevel('singboxRouter')) })}</span>
+	{/if}
+{/snippet}
 
 <Modal {open} title={m.tunnels_referenced_title()} size="sm" {onclose}>
 	{#if details}
@@ -46,7 +73,7 @@
 					<span class="rule-indices">
 						{details.routerRules.map((i) => `#${i}`).join(', ')}
 					</span>
-					<a href={PLANE_HREF.tproxy} onclick={(e) => openPlane(e, 'tproxy')}>{m.tunnels_referenced_open()}</a>
+					{@render openLink('tproxy')}
 				</li>
 			{/if}
 			{#if details.routerOther}
@@ -54,7 +81,7 @@
 					{@const ref = describeRouterReference(loc)}
 					<li>
 						{#if ref.known}{ref.text}{:else}<code>{ref.text}</code>{/if}
-						<a href={PLANE_HREF[ref.plane]} onclick={(e) => openPlane(e, ref.plane)}>{m.tunnels_referenced_open()}</a>
+						{@render openLink(ref.plane)}
 					</li>
 				{/each}
 			{/if}
@@ -86,6 +113,10 @@
 		font-family: var(--font-mono);
 		font-size: 0.8125rem;
 		color: var(--color-text-muted);
+	}
+	.level-note {
+		color: var(--color-text-muted);
+		font-size: 0.8125rem;
 	}
 	.hint {
 		color: var(--color-text-muted);
