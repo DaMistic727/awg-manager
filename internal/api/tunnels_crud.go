@@ -962,15 +962,15 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 				h.log.Warn("replace", stored.Name, "Restart after failed config replace failed: "+startErr.Error())
 			}
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, tunnel.ErrNotFound) {
 			response.ErrorWithStatus(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
 			return
 		}
-		if strings.Contains(err.Error(), "parse conf") {
+		if errors.Is(err, tunnel.ErrParseConf) {
 			response.BadRequest(w, err.Error())
 			return
 		}
-		if strings.Contains(err.Error(), "validate conf") {
+		if errors.Is(err, tunnel.ErrValidateConf) {
 			response.Error(w, err.Error(), awg3ErrorCode(err))
 			return
 		}

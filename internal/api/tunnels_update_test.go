@@ -604,12 +604,12 @@ func TestTunnelReplaceConf_OperationInProgressIs409(t *testing.T) {
 	}
 }
 
-// ReplaceConfig возвращает fmt.Errorf("validate conf: %w", err), когда
+// ReplaceConfig оборачивает tunnel.ErrValidateConf, когда
 // config.ValidateObfuscation отвергает конфиг. Хендлер обязан вернуть 400
 // INVALID_AWG3, а не 500 InternalError.
 func TestTunnelReplaceConf_ValidateConfIs400InvalidAWG3(t *testing.T) {
 	stub := &stubTunnelSvc{
-		replaceErr: fmt.Errorf("validate conf: %s", "H1 и H2 пересекаются"),
+		replaceErr: fmt.Errorf("%w: %s", tunnel.ErrValidateConf, "H1 и H2 пересекаются"),
 	}
 	h, store := newTunnelsUpdateHarness(t, stub)
 	if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL_CHIS"}); err != nil {
@@ -1149,6 +1149,39 @@ func TestTunnelReplaceConf_SameLongNameNotRefused(t *testing.T) {
 	}
 }
 
+// Код ответа ReplaceConf решают сентинелы службы, а не текст обёрток: их
+// переформулировка молча превращала 400 в 500 (F666).
+func TestTunnelReplaceConf_ErrorStatusBySentinel(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode int
+		wantBody string
+	}{
+		{"not found", fmt.Errorf("lookup: %w", tunnel.ErrNotFound), http.StatusNotFound, "NOT_FOUND"},
+		{"parse", fmt.Errorf("%w: другая формулировка", tunnel.ErrParseConf), http.StatusBadRequest, ""},
+		{"validate", fmt.Errorf("%w: H1 и H2", tunnel.ErrValidateConf), http.StatusBadRequest, "INVALID_AWG3"},
+		{"прочее", errors.New("parse conf и validate conf, но не сентинел"), http.StatusInternalServerError, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubTunnelSvc{
+				stateFn:    func(string) tunnel.StateInfo { return tunnel.StateInfo{State: tunnel.StateStopped} },
+				replaceErr: tc.err,
+			}
+			h, store := newTunnelsUpdateHarness(t, stub)
+			if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL"}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			body, _ := json.Marshal(map[string]string{"content": "[Interface]\n"})
+			rec := httptest.NewRecorder()
+			h.ReplaceConf(rec, httptest.NewRequest(http.MethodPost, "/tunnels/replace?id=awg11", bytes.NewReader(body)))
+			if rec.Code != tc.wantCode || !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Fatalf("код = %d, тело: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 // F520: замена упала после Stop — работавший туннель поднимается обратно, а
 // не остаётся выключенным; невключённый так и остаётся невключённым.
 func TestTunnelReplaceConf_FailedReplaceRestartsRunningTunnel(t *testing.T) {
@@ -1163,7 +1196,7 @@ func TestTunnelReplaceConf_FailedReplaceRestartsRunningTunnel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubTunnelSvc{
 				stateFn:    func(string) tunnel.StateInfo { return tunnel.StateInfo{State: tc.state} },
-				replaceErr: errors.New("parse conf: bad key"),
+				replaceErr: fmt.Errorf("%w: bad key", tunnel.ErrParseConf),
 			}
 			h, store := newTunnelsUpdateHarness(t, stub)
 			if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL"}); err != nil {
@@ -1191,7 +1224,7 @@ func TestTunnelReplaceConf_RestartIgnoresClientCancel(t *testing.T) {
 		name       string
 		replaceErr error
 	}{
-		{"replace failed", errors.New("parse conf: bad key")},
+		{"replace failed", fmt.Errorf("%w: bad key", tunnel.ErrParseConf)},
 		{"replace ok", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

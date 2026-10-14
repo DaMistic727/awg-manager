@@ -903,7 +903,7 @@ func (s *ServiceImpl) Import(ctx context.Context, confContent, name, backend str
 	// Parse config
 	parsed, err := config.Parse(confContent)
 	if err != nil {
-		return nil, fmt.Errorf("parse conf: %w", err)
+		return nil, fmt.Errorf("%w: %w", tunnel.ErrParseConf, err)
 	}
 
 	// Тот же гейт, что и на create/update: чужой .conf с битым
@@ -1181,19 +1181,19 @@ func (s *ServiceImpl) ReplaceConfig(ctx context.Context, tunnelID, confContent, 
 	if stored.Obfuscator != nil {
 		var err error
 		if inst, _, instPresent, err = obfuscator.ParseInstance(confContent); err != nil {
-			return err
+			return fmt.Errorf("%w: %w", tunnel.ErrParseConf, err)
 		}
 	}
 	confContent = obfuscator.StripInstance(confContent)
 
 	parsed, err := config.Parse(confContent)
 	if err != nil {
-		return fmt.Errorf("parse conf: %w", err)
+		return fmt.Errorf("%w: %w", tunnel.ErrParseConf, err)
 	}
 	// Тот же гейт, что у импорта, create и update: модуль такой конфиг всё
 	// равно отвергнет на setconf, отказать здесь — честнее.
 	if err := config.ValidateObfuscation(&parsed.Interface.AWGObfuscation); err != nil {
-		return fmt.Errorf("validate conf: %w", err)
+		return fmt.Errorf("%w: %w", tunnel.ErrValidateConf, err)
 	}
 
 	// Обфусцированный туннель: endpoint остаётся loopback, [instance] из

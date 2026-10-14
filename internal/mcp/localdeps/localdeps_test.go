@@ -959,7 +959,7 @@ func TestLocal_ReplaceTunnelConfigStopsAndStarts(t *testing.T) {
 
 	t.Run("a failed replace starts the tunnel back (F520 class)", func(t *testing.T) {
 		l, ft, _ := newLifecycle(t, tunnel.StateRunning)
-		ft.replaceErr = fmt.Errorf("parse conf: bad")
+		ft.replaceErr = fmt.Errorf("%w: bad", tunnel.ErrParseConf)
 		if _, err := l.ReplaceTunnelConfig(ctx, "tn-1", "cfg", ""); err == nil {
 			t.Fatal("ждали ошибку замены")
 		}

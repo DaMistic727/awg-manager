@@ -27,6 +27,13 @@ var (
 	// retryable 409 instead of queueing behind the lock indefinitely.
 	ErrOperationInProgress = errors.New("операция с туннелем уже выполняется — дождитесь завершения предыдущей")
 
+	// ErrParseConf — .conf не разобран: ошибка ввода. Ручки отвечают на неё
+	// 400 по errors.Is, а не по тексту обёртки (F666).
+	ErrParseConf = errors.New("parse conf")
+
+	// ErrValidateConf — .conf разобран, но параметры AWG отвергнуты.
+	ErrValidateConf = errors.New("validate conf")
+
 	// ErrAddressInUse indicates the tunnel address is already assigned to a system interface.
 	ErrAddressInUse = errors.New("address already in use")
 

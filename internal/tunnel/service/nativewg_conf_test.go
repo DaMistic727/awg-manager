@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,5 +120,13 @@ func TestReplaceConfig_RejectsOverlappingHeaders(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "H1 и H2") {
 		t.Errorf("ошибка = %v, ожидалось упоминание H1 и H2", err)
+	}
+	// Ручка отвечает по сентинелу, а не по тексту обёртки (F666).
+	if !errors.Is(err, tunnel.ErrValidateConf) || errors.Is(err, tunnel.ErrParseConf) {
+		t.Errorf("ошибка = %v, ожидался только ErrValidateConf", err)
+	}
+	// Неразборный .conf — ErrParseConf.
+	if err := s.ReplaceConfig(context.Background(), "awg10", "[Interface]\nAddress = 10.8.0.2/32\n", ""); !errors.Is(err, tunnel.ErrParseConf) {
+		t.Errorf("ошибка = %v, ожидался ErrParseConf", err)
 	}
 }
