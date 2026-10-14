@@ -217,7 +217,7 @@
 				<TunnelListEndpointLine host={tunnel.server} port={tunnel.port} bind:show={showServer} />
 			</div>
 		</td>
-		<td class="list-cell list-cell-badges">
+		<td class="list-cell list-cell-badges tunnel-list-cell tunnel-list-cell--badges">
 			<div class="badges-inline">
 				<span class="badge b-{tunnel.protocol}">{protocolLabel}</span>
 				{#if tunnel.security === 'reality'}
@@ -228,7 +228,7 @@
 				<span class="badge b-transport">{tunnel.transport.toUpperCase()}</span>
 			</div>
 		</td>
-		<td class="list-cell list-cell-run">
+		<td class="list-cell list-cell-run tunnel-list-cell tunnel-list-cell--run">
 			<span class="run-pill" class:run-on={tunnel.running === true}>{tunnel.running === true ? 'running' : 'stopped'}</span>
 		</td>
 		<td class="tunnel-list-cell tunnel-list-cell--traffic list-cell list-cell-traffic">

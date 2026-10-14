@@ -1140,18 +1140,11 @@ button.tunnel-list-traffic-cell:focus-visible {
 	background: var(--color-bg-secondary);
 }
 
-.singbox-tunnel-table .sbx-tunnel-list-row {
-	display: table-row !important;
-}
-
-.singbox-sub-table .sbx-sub-active-row,
-.singbox-sub-table .sbx-sub-list-row {
-	display: table-row !important;
-}
-
+/* Табличный display здесь не форсируется (F376): сброс через !important
+   прятал не-табличный display на ячейках, и ошибка проявлялась в одной
+   колонке из семи (#921). Ячейка с flex обязана ломать вёрстку сразу. */
 .singbox-tunnel-table td.tunnel-list-cell,
 .singbox-sub-table td.tunnel-list-cell {
-	display: table-cell !important;
 	vertical-align: middle;
 	min-width: 0;
 }

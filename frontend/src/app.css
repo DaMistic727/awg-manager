@@ -1534,10 +1534,10 @@ input.api-key-input {
 	box-sizing: border-box;
 }
 
+/* Только прямые потомки трека: строки sing-box-таблиц — <tr> внутри
+   <table>, сюда не попадают (F377). */
 .awg-list-table-track > :is(
 	.awg-list-row,
-	.sbx-sub-list-row,
-	.sbx-tunnel-list-row,
 	.sbx-member-list-row
 ) {
 	min-width: max(100%, max-content);
