@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -1157,6 +1158,11 @@ func (r *Runner) testRestartCycle(ctx context.Context, t TunnelInfo) TestResult 
 	if err := r.deps.TunnelService.Stop(ctx, t.ID); err != nil {
 		res.Status = StatusError
 		res.Detail = "Stop failed: " + err.Error()
+		// Занятый замок — Stop ничего не сделал, и чужую операцию (например,
+		// пользовательский Stop) перебивать нельзя.
+		if !errors.Is(err, tunnel.ErrOperationInProgress) {
+			res.Detail += r.restoreAfterCycle(ctx, t.ID)
+		}
 		return res
 	}
 	stopDuration := time.Since(stopStart)
@@ -1168,7 +1174,8 @@ func (r *Runner) testRestartCycle(ctx context.Context, t TunnelInfo) TestResult 
 	startStart := time.Now()
 	if err := r.deps.TunnelService.Start(ctx, t.ID); err != nil {
 		res.Status = StatusFail
-		res.Detail = fmt.Sprintf("Stop OK (%s), Start failed: %s", stopDuration.Round(time.Second), err.Error())
+		res.Detail = fmt.Sprintf("Stop OK (%s), Start failed: %s", stopDuration.Round(time.Second), err.Error()) +
+			r.restoreAfterCycle(ctx, t.ID)
 		return res
 	}
 	startDuration := time.Since(startStart)
@@ -1203,6 +1210,24 @@ waitLoop:
 			stopDuration.Round(time.Second), startDuration.Round(time.Second))
 	}
 	return res
+}
+
+// restoreAfterCycle возвращает туннель, который тест застал запущенным и
+// включённым, в исходное состояние после отказа Stop или Start: упавшая
+// остановка уже сняла маршруты и записала Enabled=false, и без этого
+// диагностика оставляла бы туннель выключенным — после ребута он бы не
+// поднялся (F657, по образцу F649). Контекст без отмены: закрытая вкладка не
+// должна оставить туннель лежать. Не поднялся и Restart — хотя бы автозапуск.
+func (r *Runner) restoreAfterCycle(ctx context.Context, tunnelID string) string {
+	ctx = context.WithoutCancel(ctx)
+	err := r.deps.TunnelService.Restart(ctx, tunnelID)
+	if err == nil {
+		return "; туннель перезапущен"
+	}
+	if eerr := r.deps.TunnelService.SetEnabled(ctx, tunnelID, true); eerr != nil {
+		return "; восстановить не удалось: " + err.Error() + "; автозапуск: " + eerr.Error()
+	}
+	return "; перезапуск не удался (" + err.Error() + "), автозапуск оставлен включённым"
 }
 
 func (r *Runner) testProxyHealth(t TunnelInfo) TestResult {

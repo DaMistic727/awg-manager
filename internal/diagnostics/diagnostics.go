@@ -395,6 +395,8 @@ type TunnelServiceForDiag interface {
 	List(ctx context.Context) ([]service.TunnelWithStatus, error)
 	Start(ctx context.Context, tunnelID string) error
 	Stop(ctx context.Context, tunnelID string) error
+	Restart(ctx context.Context, tunnelID string) error
+	SetEnabled(ctx context.Context, tunnelID string, enabled bool) error
 	WANModel() *wan.Model
 	GetResolvedISP(tunnelID string) string
 }

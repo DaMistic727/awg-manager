@@ -40,10 +40,12 @@ type listOnlyTunnelService struct{ list []service.TunnelWithStatus }
 func (f listOnlyTunnelService) List(context.Context) ([]service.TunnelWithStatus, error) {
 	return f.list, nil
 }
-func (listOnlyTunnelService) Start(context.Context, string) error { return nil }
-func (listOnlyTunnelService) Stop(context.Context, string) error  { return nil }
-func (listOnlyTunnelService) WANModel() *wan.Model                { return nil }
-func (listOnlyTunnelService) GetResolvedISP(string) string        { return "" }
+func (listOnlyTunnelService) Start(context.Context, string) error            { return nil }
+func (listOnlyTunnelService) Stop(context.Context, string) error             { return nil }
+func (listOnlyTunnelService) Restart(context.Context, string) error          { return nil }
+func (listOnlyTunnelService) SetEnabled(context.Context, string, bool) error { return nil }
+func (listOnlyTunnelService) WANModel() *wan.Model                           { return nil }
+func (listOnlyTunnelService) GetResolvedISP(string) string                   { return "" }
 
 // F588: зеркальная запись wdtt-raw в разделе туннелей не появляется — иначе
 // её проверки читали бы opkgtun0, интерфейс чужого туннеля.

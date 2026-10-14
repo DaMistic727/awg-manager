@@ -17,6 +17,8 @@ type diagTunnels []service.TunnelWithStatus
 func (d diagTunnels) List(context.Context) ([]service.TunnelWithStatus, error) { return d, nil }
 func (diagTunnels) Start(context.Context, string) error                        { return nil }
 func (diagTunnels) Stop(context.Context, string) error                         { return nil }
+func (diagTunnels) Restart(context.Context, string) error                      { return nil }
+func (diagTunnels) SetEnabled(context.Context, string, bool) error             { return nil }
 func (diagTunnels) WANModel() *wan.Model                                       { return nil }
 func (diagTunnels) GetResolvedISP(string) string                               { return "" }
 
