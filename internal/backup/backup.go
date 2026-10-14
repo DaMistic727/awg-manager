@@ -54,7 +54,11 @@ func CheckDataDir(dataDir string) error {
 }
 
 // Export writes a gzip-compressed tar of dataDir to w. Runtime caches are skipped.
+// Под тем же замком, что Restore: выгрузка посреди восстановления сняла бы
+// каталог наполовину заменённым (F457).
 func Export(dataDir, appVersion string, w io.Writer) error {
+	restoreMu.Lock()
+	defer restoreMu.Unlock()
 	if err := CheckDataDir(dataDir); err != nil {
 		return err
 	}

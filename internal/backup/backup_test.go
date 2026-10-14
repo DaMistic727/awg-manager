@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/proxyrt/instancestore"
 	"github.com/hoaxisr/awg-manager/internal/proxyrt/roles"
@@ -1021,5 +1022,23 @@ func TestRestore_RejectsFileOverLiveDirectory(t *testing.T) {
 				t.Fatalf("каталог %s испорчен отказанным восстановлением: %v", name, err)
 			}
 		})
+	}
+}
+
+// Выгрузка ждёт идущего восстановления — один замок (F457).
+func TestExport_WaitsForRestore(t *testing.T) {
+	dir := t.TempDir()
+	restoreMu.Lock()
+	done := make(chan error, 1)
+	go func() { done <- Export(dir, "test", io.Discard) }()
+	select {
+	case <-done:
+		restoreMu.Unlock()
+		t.Fatal("выгрузка прошла посреди восстановления")
+	case <-time.After(100 * time.Millisecond):
+	}
+	restoreMu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
