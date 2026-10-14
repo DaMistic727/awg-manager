@@ -19,7 +19,7 @@
 	import { SettingsSectionLabel } from '$lib/components/settings';
 	import { awgParamHints } from '$lib/utils/awgParamHints';
 	import { awgProxyOutdated, supportsAwg3, supportsAwg31OnNativeWG } from '$lib/utils/backendAvailability';
-	import { keepaliveHint } from '$lib/utils/keepalive';
+	import { keepaliveHint, keepaliveIsZeroed } from '$lib/utils/keepalive';
 	import { Network, Route, Router, Server, Shuffle, Tag } from 'lucide-svelte';
 
 	let { data } = $props();
@@ -486,6 +486,8 @@
 						</div>
 						{#if keepaliveApplied !== null}
 							<p class="field-hint">{m.tunnel_detail_keepalive_applied({ seconds: keepaliveApplied })}</p>
+						{:else if keepaliveIsZeroed($form.persistentKeepalive)}
+							<p class="field-hint">{m.tunnel_detail_keepalive_zero()}</p>
 						{/if}
 					</section>
 				</form>

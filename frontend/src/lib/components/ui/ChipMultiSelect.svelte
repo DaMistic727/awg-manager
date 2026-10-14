@@ -163,6 +163,9 @@
 
     function handleKeydown(e: KeyboardEvent) {
         if (e.key !== 'Escape' || !open) return;
+        // Перехват на window — раньше всех: Modal ловит Esc на window, а
+        // SideDrawer — на document, и без остановки Esc закрыл бы и их (F432).
+        e.stopPropagation();
         // Two-stage Esc: first clear the search if any, then close. Matches
         // common search-dropdown UX so users don't lose their entire query
         // state when they only meant to dismiss the filter.
@@ -178,12 +181,12 @@
     $effect(() => {
         if (!open) return;
         document.addEventListener('mousedown', handleOutsideClick);
-        document.addEventListener('keydown', handleKeydown);
+        window.addEventListener('keydown', handleKeydown, true);
         window.addEventListener('scroll', handleScroll, true);
         window.addEventListener('resize', handleScroll);
         return () => {
             document.removeEventListener('mousedown', handleOutsideClick);
-            document.removeEventListener('keydown', handleKeydown);
+            window.removeEventListener('keydown', handleKeydown, true);
             window.removeEventListener('scroll', handleScroll, true);
             window.removeEventListener('resize', handleScroll);
         };

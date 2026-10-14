@@ -295,7 +295,6 @@ export interface Settings {
 	geoFile: GeoFileSettings;
 	connectivityCheckUrl: string;
 	usageLevel: UsageLevel;
-	hiddenSystemTunnels?: string[];
 	monitoringExcludedTunnels?: string[];
 	/**
 	 * Адрес bootstrap-резолвера sing-box (dns-bootstrap в 00-base.json):

@@ -97,6 +97,8 @@
     ),
   );
   let issueCount = $derived(issues.length);
+  // Красное замечание не должно считаться жёлтым бейджем (F387).
+  let issueBadge = $derived<'error' | 'warning'>(issues.some((i) => i.tone === 'error') ? 'error' : 'warning');
 
   let wanInterfaces = $state<SingboxRouterWANInterface[]>([]);
   let saving = $state(false);
@@ -383,7 +385,7 @@
     <!-- Замечания -->
     {#if issueCount > 0}
       <section class="sec">
-        <div class="sec-cap">{m.sb_router_status_sec_issues()} <Badge variant="warning" size="sm">{issueCount}</Badge></div>
+        <div class="sec-cap">{m.sb_router_status_sec_issues()} <Badge variant={issueBadge} size="sm">{issueCount}</Badge></div>
         {#each issues as issue}
           <IssueRow tone={issue.tone} text={issue.text} ctaHint={issue.ctaHint} />
         {/each}

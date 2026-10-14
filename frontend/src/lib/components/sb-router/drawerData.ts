@@ -40,12 +40,18 @@ export function deriveDeps(status: SingboxRouterStatus | null): DepEntry[] {
   ];
 }
 
+// Замечания, которые в экспертной панели не чинятся: маршрут policy-tun
+// восстанавливает реконсиль или администратор в NDMS, политику доступа
+// настраивают в NDMS, мёртвый движок — не правка конфига. Подсказка «в
+// Эксперт» отправляла бы туда, где решения нет (F387).
+const noExpertRemedy = new Set(['policy-tun-route-lost', 'policy-tun-unbound', 'engine-dead-interception']);
+
 export function deriveIssues(status: SingboxRouterStatus | null): IssueEntry[] {
   if (!status) return [];
   const issues = status.issues ?? [];
   return issues.map((i: SingboxRouterIssue) => ({
     tone: i.severity === 'error' ? ('error' as const) : ('warning' as const),
     text: i.message,
-    ctaHint: m.sb_router_issue_cta_expert(),
+    ctaHint: noExpertRemedy.has(i.kind) ? undefined : m.sb_router_issue_cta_expert(),
   }));
 }

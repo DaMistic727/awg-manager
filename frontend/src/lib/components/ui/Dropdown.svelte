@@ -175,12 +175,25 @@
     }
   }
 
+  // Esc закрывает только список. Перехват на window — раньше всех: Modal
+  // ловит Esc на window, SideDrawer — на document, а панель живёт в портале,
+  // и остановка на ней самой SideDrawer не останавливала (F432).
+  function handleEscCapture(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    closePanel();
+    triggerEl?.focus();
+  }
+
+  $effect(() => {
+    if (!open) return;
+    window.addEventListener('keydown', handleEscCapture, true);
+    return () => window.removeEventListener('keydown', handleEscCapture, true);
+  });
+
   function handlePanelKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closePanel();
-      triggerEl?.focus();
-    } else if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
       activeIndex = nextEnabled(activeIndex, 1);
       scrollActiveIntoView();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { effectiveKeepalive, keepaliveHint } from './keepalive';
+import { effectiveKeepalive, keepaliveHint, keepaliveIsZeroed } from './keepalive';
 
 // Таблица обязана совпадать с TestKeepaliveEffective
 // (internal/storage/keepalive_test.go): подпись в карточке считает то же
@@ -58,6 +58,26 @@ describe('keepaliveHint', () => {
 	for (const [backend, raw, want] of table) {
 		it(`${JSON.stringify(backend)} + ${JSON.stringify(raw)} → ${want}`, () => {
 			expect(keepaliveHint(backend, raw)).toBe(want);
+		});
+	}
+});
+
+// F651: пусто и 0 генератор .conf заменяет на 25 — подпись у поля. Таблица —
+// зеркало storage.Keepalive.IsZero (без обрезки пробелов).
+describe('keepaliveIsZeroed', () => {
+	const table: Array<[string | number | null | undefined, boolean]> = [
+		['', true],
+		['0', true],
+		[0, true],
+		[null, true],
+		[undefined, true],
+		['25', false],
+		['0-80', false],
+		[' 0 ', false],
+	];
+	for (const [raw, want] of table) {
+		it(`${JSON.stringify(raw)} → ${want}`, () => {
+			expect(keepaliveIsZeroed(raw)).toBe(want);
 		});
 	}
 });

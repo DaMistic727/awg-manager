@@ -34,3 +34,15 @@ export function keepaliveHint(
 	if (!String(raw ?? '').includes('-')) return null;
 	return effectiveKeepalive(raw);
 }
+
+/**
+ * keepaliveIsZeroed — пусто или 0: «выключено» в карточке, но генератор .conf
+ * подставляет 25 (страховка за NAT, решение владельца 12.09.2026) — и для
+ * kernel, и для NativeWG. Подпись у поля говорит об этом прямо (F651).
+ * Зеркало storage.Keepalive.IsZero().
+ */
+export function keepaliveIsZeroed(raw: string | number | null | undefined): boolean {
+	// Как в Go — без обрезки пробелов: « 0 » генератор нулём не считает.
+	const v = String(raw ?? '');
+	return v === '' || v === '0';
+}

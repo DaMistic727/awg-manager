@@ -82,10 +82,18 @@ describe('deriveIssues', () => {
     expect(out[0].tone).toBe('error');
   });
 
-  it('добавляет ctaHint для каждого issue', () => {
+  it('добавляет ctaHint замечаниям, которые чинятся в Эксперте', () => {
     const issue: SingboxRouterIssue = { severity: 'warning', kind: 'orphan-rule', message: 'x' };
     const out = deriveIssues(status({ issues: [issue] }));
     expect(out[0].ctaHint).toBe('(в Эксперт)');
+  });
+
+  // F387: подсказка не отправляет туда, где решения нет.
+  it('без ctaHint у замечаний, которые в Эксперте не чинятся', () => {
+    for (const kind of ['policy-tun-route-lost', 'policy-tun-unbound', 'engine-dead-interception']) {
+      const out = deriveIssues(status({ issues: [{ severity: 'error', kind, message: 'x' }] }));
+      expect(out[0].ctaHint, kind).toBeUndefined();
+    }
   });
 
   it('несколько issues сохраняют порядок', () => {

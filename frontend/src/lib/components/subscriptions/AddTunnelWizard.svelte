@@ -350,7 +350,9 @@
 
 	async function fetchPreview(): Promise<void> {
 		const isFile = kind === 'file';
-		if (previewing || (isFile ? !filePath.trim() : !url.trim())) {
+		// Повторный запуск во время запроса — не «поле пустое» (F422).
+		if (previewing) return;
+		if (isFile ? !filePath.trim() : !url.trim()) {
 			error = isFile ? () => m.subscriptions_wizard_enter_path() : () => m.subscriptions_wizard_enter_url();
 			return;
 		}

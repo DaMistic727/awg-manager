@@ -936,6 +936,7 @@
 	"tunnel_detail_endpoint_obf_hint": "The server is set on the \"Obfuscator\" tab; WireGuard connects to the local relay.",
 	"tunnel_detail_endpoint_placeholder": "vpn.example.com:51820 or [2001:db8::1]:51820",
 	"tunnel_detail_keepalive_applied": "Keepalive: {seconds} s applied — only kernel mode understands the range.",
+	"tunnel_detail_keepalive_zero": "Keepalive 0 is still applied as 25 s on the router — a safeguard behind NAT.",
 	"tunnel_detail_proxy_outdated": "awg_proxy {loaded} is loaded in the kernel, while this build has {expected}. The module cannot be replaced while tunnels are running through it: reboot the router, otherwise AWG 3.1 parameters will stay unavailable.",
 	"tunnel_detail_section_obfuscator": "Obfuscator",
 	"tunnel_detail_isp_auto": "Automatic",

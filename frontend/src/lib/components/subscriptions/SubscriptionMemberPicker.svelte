@@ -45,20 +45,25 @@
         if (!popoverEl.contains(e.target as Node)) onClose();
     }
 
+    // Фаза перехвата на window: Modal слушает Esc на window во всплытии, и
+    // остановка здесь до него событие не пустит — иначе Esc закрыл бы и
+    // модалку под пикером (F432).
     function handleKey(e: KeyboardEvent): void {
-        if (e.key === 'Escape') onClose();
+        if (e.key !== 'Escape') return;
+        e.stopPropagation();
+        onClose();
     }
 
     onMount(() => {
         // Defer one tick so the click that opened the popover doesn't immediately close it.
         const t = setTimeout(() => {
             window.addEventListener('click', handleOutsideClick);
-            window.addEventListener('keydown', handleKey);
+            window.addEventListener('keydown', handleKey, true);
         }, 0);
         return () => {
             clearTimeout(t);
             window.removeEventListener('click', handleOutsideClick);
-            window.removeEventListener('keydown', handleKey);
+            window.removeEventListener('keydown', handleKey, true);
         };
     });
 </script>

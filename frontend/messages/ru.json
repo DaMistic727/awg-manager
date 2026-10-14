@@ -954,6 +954,7 @@
 	"tunnel_detail_endpoint_obf_hint": "Сервер задаётся во вкладке «Обфускатор»; WireGuard ходит в локальный релей.",
 	"tunnel_detail_endpoint_placeholder": "vpn.example.com:51820 или [2001:db8::1]:51820",
 	"tunnel_detail_keepalive_applied": "Keepalive: применяется {seconds} с — диапазон понимает только режим kernel.",
+	"tunnel_detail_keepalive_zero": "Keepalive 0 на роутере всё равно 25 с — страховка за NAT.",
 	"tunnel_detail_proxy_outdated": "В ядре загружен awg_proxy {loaded}, а в этой сборке — {expected}. Модуль нельзя заменить, пока через него идут туннели: перезагрузите роутер, иначе параметры AWG 3.1 останутся недоступны.",
 	"tunnel_detail_section_obfuscator": "Обфускатор",
 	"tunnel_detail_isp_auto": "Автоматически",
