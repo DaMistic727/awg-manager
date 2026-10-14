@@ -869,3 +869,25 @@ func TestMaterializeConfig_UnreadableInlineSourceKeepsCompiledArtifact(t *testin
 		t.Errorf("compiled artifact must stay untouched, got %q (%v)", data, err)
 	}
 }
+
+// F333: запись слота снимает detour, которого sing-box видеть не должен, —
+// чистка была только в мутаторах, и сервер, пришедший другим путём (импорт,
+// старый файл), уходил в sing-box как есть. Вход при этом не правится.
+func TestMaterializeConfig_StripsDNSDirectDetour(t *testing.T) {
+	m := ruleSetMaterializer{configDir: t.TempDir(), binary: "/opt/bin/sing-box"}
+	cfg := NewEmptyConfig()
+	cfg.DNS.Servers = []DNSServer{
+		{Tag: "dns-direct", Type: "udp", Server: "77.88.8.8", Detour: "wg-nl"},
+		{Tag: "dns-tunnel", Type: "udp", Server: "9.9.9.9", Detour: "wg-nl"},
+	}
+	out, err := m.materializeConfig(orchestrator.SlotRouter, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.DNS.Servers[0].Detour != "" || out.DNS.Servers[1].Detour != "wg-nl" {
+		t.Fatalf("detour в записи: %+v", out.DNS.Servers)
+	}
+	if cfg.DNS.Servers[0].Detour != "wg-nl" {
+		t.Fatalf("вход изменён: %+v", cfg.DNS.Servers)
+	}
+}

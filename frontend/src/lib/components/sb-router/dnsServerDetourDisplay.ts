@@ -8,7 +8,6 @@ import type {
 } from '$lib/types';
 import type { OutboundGroup } from '$lib/components/routing/singboxRouter/outboundOptions';
 import {
-	getDnsDirectLegacyDetour,
 	normalizeDnsServerDetour,
 } from '$lib/utils/dnsServerDetour';
 import { resolveOutboundDisplay } from './adapters';
@@ -40,7 +39,6 @@ export function dnsServerSubtitle(s: SingboxRouterDNSServer): string {
 /**
  * DNS server detour chip:
  * - empty / direct (non-dns-direct) → «Напрямую»
- * - dns-direct с legacy detour → фактическое значение, красный + !
  * - конкретный outbound → обычный мелкий бейдж цели
  */
 export function dnsServerDetourDisplay(
@@ -51,35 +49,6 @@ export function dnsServerDetourDisplay(
 	proxyGroups: SingboxProxyGroup[] = [],
 	singboxTunnels: SingboxTunnel[] = [],
 ): OutboundDisplay {
-	const legacyDirect = getDnsDirectLegacyDetour(server);
-	if (legacyDirect) {
-		const base =
-			legacyDirect === 'direct'
-				? resolveOutboundDisplay(
-						'direct',
-						'direct',
-						outbounds,
-						outboundOptions,
-						subscriptions,
-						proxyGroups,
-						singboxTunnels,
-					)
-				: resolveOutboundDisplay(
-						legacyDirect,
-						'route',
-						outbounds,
-						outboundOptions,
-						subscriptions,
-						proxyGroups,
-						singboxTunnels,
-					);
-		return {
-			...base,
-			tone: 'invalid',
-			invalidHint: m.sb_router_dns_invalid_final_detour(),
-		};
-	}
-
 	const detour = server.detour?.trim() ?? '';
 
 	if (detour === 'direct' || !detour) {

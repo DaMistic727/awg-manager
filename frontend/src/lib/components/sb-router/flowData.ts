@@ -96,8 +96,7 @@ export function deriveRoutingSummary(
   const finalServer = dnsServers.find((x) => x.tag === dnsGlobals.final);
   const defaultDnsLabel = finalServer ? finalServer.server || finalServer.tag : m.sb_router_flow_dns_system();
 
-  // На легаси-конфигах detour может висеть на dns-direct — тег dns-tunnel
-  // приоритетнее первого сервера с detour.
+  // Тег dns-tunnel приоритетнее первого сервера с detour.
   const detourServer = dnsServers.find((s) => s.tag === DNS_TUNNEL_TAG) ?? dnsServers.find((s) => !!s.detour);
   const tunnelDnsLabel = detourServer ? (detourServer.server || detourServer.tag) : null;
 

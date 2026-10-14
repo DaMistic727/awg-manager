@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -127,6 +128,11 @@ func (m ruleSetMaterializer) materializeConfig(slot orchestrator.Slot, cfg *Rout
 	}
 	working := m.expandManagedToInline(cfg)
 	out := *working
+	// Слот — это конфиг sing-box: detour, которого sing-box видеть не должен
+	// (direct, любой у dns-direct), снимается при записи — на копии, out
+	// неглубокий (F333).
+	out.DNS.Servers = slices.Clone(working.DNS.Servers)
+	SanitizeDNSConfig(&out)
 	out.Route = working.Route
 	out.Route.RuleSet = make([]RuleSet, 0, len(working.Route.RuleSet))
 

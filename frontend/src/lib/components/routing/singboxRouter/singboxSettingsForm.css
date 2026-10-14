@@ -392,25 +392,3 @@
 	}
 
 }
-
-.sbr-settings-form .detour-legacy-wrap {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-}
-
-.sbr-settings-form .detour-legacy-wrap .detour-legacy-dropdown {
-	flex: 1;
-	min-width: 0;
-}
-
-.sbr-settings-form .detour-legacy-icon {
-	flex-shrink: 0;
-	color: var(--error);
-}
-
-.sbr-settings-form .detour-legacy-invalid :global(.trigger) {
-	border-color: rgba(181, 101, 119, 0.55) !important;
-	background: rgba(181, 101, 119, 0.1) !important;
-	color: var(--error) !important;
-}

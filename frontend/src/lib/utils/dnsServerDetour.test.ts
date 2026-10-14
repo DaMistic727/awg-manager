@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
 	DNS_DIRECT_SERVER_TAG,
-	getDnsDirectLegacyDetour,
 	normalizeDnsServerDetour,
 	isDnsServerEmptyDetour,
 	shouldOmitDnsServerDetour,
@@ -82,14 +81,6 @@ describe('sanitizeDnsServerForApi', () => {
 			server: '9.9.9.9',
 			detour: 'wg-nl',
 		});
-	});
-});
-
-describe('getDnsDirectLegacyDetour', () => {
-	it('returns stored detour only for dns-direct', () => {
-		expect(getDnsDirectLegacyDetour({ tag: 'dns-direct', detour: 'wg-nl' })).toBe('wg-nl');
-		expect(getDnsDirectLegacyDetour({ tag: 'dns-tunnel', detour: 'wg-nl' })).toBeNull();
-		expect(getDnsDirectLegacyDetour({ tag: 'dns-direct', detour: '' })).toBeNull();
 	});
 });
 

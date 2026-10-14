@@ -64,15 +64,6 @@ var validRejectMethods = map[string]bool{
 
 const managedDNSDirectTag = "dns-direct"
 
-// scrubDNSServerDetourStored normalizes only values that must never be kept in
-// the editable router config (explicit direct → empty). Legacy detour on
-// dns-direct is preserved so the UI can warn until the user saves.
-func scrubDNSServerDetourStored(s *DNSServer) {
-	if strings.TrimSpace(s.Detour) == "direct" {
-		s.Detour = ""
-	}
-}
-
 // scrubDNSServerDetourForSingbox clears detour values that must not reach
 // sing-box: empty, explicit "direct", and any detour on dns-direct. A named
 // detour makes sing-box ignore other dial fields, so it also clears the stale
@@ -87,23 +78,15 @@ func scrubDNSServerDetourForSingbox(s *DNSServer) {
 	}
 }
 
-// SanitizeDNSConfigForSingbox prepares DNS servers for 20-router.json / sing-box.
-func SanitizeDNSConfigForSingbox(cfg *RouterConfig) {
-	if cfg == nil {
-		return
-	}
-	for i := range cfg.DNS.Servers {
-		scrubDNSServerDetourForSingbox(&cfg.DNS.Servers[i])
-	}
-}
-
-// SanitizeDNSConfig normalizes stored router config after load (direct only).
+// SanitizeDNSConfig снимает detour, которого sing-box видеть не должен. Слот
+// 20-router.json — сам конфиг sing-box, отдельной «хранимой» формы нет:
+// чистка одна и та же при загрузке и при записи (materializeConfig) (F333).
 func SanitizeDNSConfig(cfg *RouterConfig) {
 	if cfg == nil {
 		return
 	}
 	for i := range cfg.DNS.Servers {
-		scrubDNSServerDetourStored(&cfg.DNS.Servers[i])
+		scrubDNSServerDetourForSingbox(&cfg.DNS.Servers[i])
 	}
 }
 

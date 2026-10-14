@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/i18n';
 	import { Button, Dropdown, type DropdownOption } from '$lib/components/ui';
-	import { OctagonAlert } from 'lucide-svelte';
 	import SingboxSettingsModal from './SingboxSettingsModal.svelte';
 	import type {
 		SingboxRouterDNSServer,
@@ -11,11 +10,9 @@
 	import { outboundGroupLabel, type OutboundGroup } from './outboundOptions';
 	import {
 		DNS_DIRECT_SERVER_TAG,
-		getDnsDirectLegacyDetour,
 		normalizeDnsServerDetour,
 		sanitizeDnsServerForApi,
 	} from '$lib/utils/dnsServerDetour';
-	import { dnsServerDetourDisplay } from '$lib/components/sb-router/dnsServerDetourDisplay';
 	import { api } from '$lib/api/client';
 
 	interface Props {
@@ -63,19 +60,6 @@
 	const dnsDirectDetourOptions = $derived<DropdownOption[]>([
 		{ value: '', label: m.routing_singbox_direct() },
 	]);
-
-	const legacyDnsDirectDetour = $derived(server ? getDnsDirectLegacyDetour(server) : null);
-
-	const legacyDnsDirectDisplay = $derived.by(() => {
-		if (!server || !legacyDnsDirectDetour) return null;
-		return dnsServerDetourDisplay(server, [], outboundOptions);
-	});
-
-	const dnsDirectLegacyDetourOptions = $derived<DropdownOption[]>(
-		legacyDnsDirectDetour && legacyDnsDirectDisplay
-			? [{ value: legacyDnsDirectDetour, label: legacyDnsDirectDisplay.label }]
-			: dnsDirectDetourOptions,
-	);
 
 	// svelte-ignore state_referenced_locally
 	let tag = $state(server?.tag ?? '');
@@ -216,7 +200,6 @@
 
 	const isDirty = $derived.by(() => {
 		return (
-			!!legacyDnsDirectDetour ||
 			tag !== initialTag ||
 			type !== initialType ||
 			serverAddr !== initialServerAddr ||
@@ -388,29 +371,11 @@
 				{#if isManagedDnsDirect}
 					<label class="field">
 						<div class="lbl">Detour (outbound)</div>
-						<div class="detour-legacy-wrap" class:detour-legacy-invalid={!!legacyDnsDirectDetour}>
-							{#if legacyDnsDirectDetour}
-								<OctagonAlert size={16} strokeWidth={2} aria-hidden={true} class="detour-legacy-icon" />
-							{/if}
-							<div class="detour-legacy-dropdown">
-								<Dropdown
-									value={legacyDnsDirectDetour ?? ''}
-									options={dnsDirectLegacyDetourOptions}
-									disabled
-									fullWidth
-								/>
-							</div>
+						<Dropdown value="" options={dnsDirectDetourOptions} disabled fullWidth />
+						<div class="hint">
+							{m.routing_singbox_dns_final_direct_pre()} <strong>{m.routing_singbox_dns_final_direct_strong()}</strong> {m.routing_singbox_dns_final_direct_post()}
+							<code>detour</code> {m.routing_singbox_dns_detour_not_written()}
 						</div>
-						{#if legacyDnsDirectDetour}
-							<div class="warn">
-								{m.routing_singbox_dns_detour_invalid()}
-							</div>
-						{:else}
-							<div class="hint">
-								{m.routing_singbox_dns_final_direct_pre()} <strong>{m.routing_singbox_dns_final_direct_strong()}</strong> {m.routing_singbox_dns_final_direct_post()}
-								<code>detour</code> {m.routing_singbox_dns_detour_not_written()}
-							</div>
-						{/if}
 					</label>
 				{:else}
 					<label class="field">

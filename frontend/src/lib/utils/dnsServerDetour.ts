@@ -52,13 +52,6 @@ export function isDnsServerEmptyDetour(detour?: string | null): boolean {
 	return normalizeDnsServerDetour(detour) === undefined;
 }
 
-/** Non-empty detour stored on dns-direct — invalid until user saves. */
-export function getDnsDirectLegacyDetour(server: Pick<SingboxRouterDNSServer, 'tag' | 'detour'>): string | null {
-	if (server.tag?.trim() !== DNS_DIRECT_SERVER_TAG) return null;
-	const raw = server.detour?.trim();
-	return raw || null;
-}
-
 /** Whether detour should be omitted when serializing a DNS server. */
 export function shouldOmitDnsServerDetour(
 	tag: string,

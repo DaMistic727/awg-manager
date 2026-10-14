@@ -126,7 +126,8 @@ func TestUpdateDNSServerStripsDetourOnDNSDirect(t *testing.T) {
 	}
 }
 
-func TestLoadConfigPreservesLegacyDNSDirectDetour(t *testing.T) {
+// F333: слот — конфиг sing-box; detour у dns-direct снимается и при загрузке.
+func TestLoadConfigStripsLegacyDNSDirectDetour(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "20-router.json")
 	raw := []byte(`{
@@ -143,12 +144,12 @@ func TestLoadConfigPreservesLegacyDNSDirectDetour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DNS.Servers[0].Detour != "wg-nl" {
-		t.Fatalf("legacy dns-direct detour preserved in store, got %q", cfg.DNS.Servers[0].Detour)
+	if cfg.DNS.Servers[0].Detour != "" {
+		t.Fatalf("legacy dns-direct detour stripped on load, got %q", cfg.DNS.Servers[0].Detour)
 	}
 }
 
-func TestSanitizeDNSConfigForSingboxStripsDNSDirectDetour(t *testing.T) {
+func TestSanitizeDNSConfigStripsDNSDirectDetour(t *testing.T) {
 	cfg := &RouterConfig{
 		DNS: DNS{
 			Servers: []DNSServer{
@@ -157,7 +158,7 @@ func TestSanitizeDNSConfigForSingboxStripsDNSDirectDetour(t *testing.T) {
 			},
 		},
 	}
-	SanitizeDNSConfigForSingbox(cfg)
+	SanitizeDNSConfig(cfg)
 	if cfg.DNS.Servers[0].Detour != "" {
 		t.Fatalf("dns-direct detour stripped for sing-box, got %q", cfg.DNS.Servers[0].Detour)
 	}

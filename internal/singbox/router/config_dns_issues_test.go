@@ -50,21 +50,6 @@ func TestDNSDialIssues_CrossSlotResolverRefsAreNotFlagged(t *testing.T) {
 	}
 }
 
-// detour + domain_resolver: dial-поля при detour игнорируются. Ровно одно
-// предупреждение, IP-сервер не задет.
-func TestDNSDialIssues_DetourIgnoresDialFields(t *testing.T) {
-	cfg := NewEmptyConfig()
-	cfg.DNS.Servers = []DNSServer{
-		{Tag: "remote", Type: "udp", Server: "1.1.1.1", Detour: "vpn", DomainResolver: &DomainResolver{Server: "direct"}},
-		{Tag: "direct", Type: "udp", Server: "77.88.8.8"},
-	}
-	msgs := dialIssueMessages(cfg)
-	if len(msgs) != 1 {
-		t.Fatalf("want exactly 1 issue, got %v", msgs)
-	}
-	requireIssueContaining(t, msgs, "при заданном detour остальные dial-поля игнорируются")
-}
-
 // Доменный сервер с detour и без резолвера — НЕ предупреждение: адрес уедет
 // на удалённое разрешение через detour-outbound. Закрепляем исключение.
 func TestDNSDialIssues_DetouredDomainServerNeedsNoResolver(t *testing.T) {

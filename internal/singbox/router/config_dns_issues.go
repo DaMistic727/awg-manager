@@ -81,20 +81,6 @@ func computeDNSDialIssues(cfg *RouterConfig) []Issue {
 		seenTags[s.Tag] = true
 	}
 
-	for _, s := range cfg.DNS.Servers {
-		if !dnsUpstreamTypes[s.Type] {
-			continue
-		}
-		if s.Detour != "" && s.DomainResolver != nil {
-			issues = append(issues, Issue{
-				Severity: "warning",
-				Kind:     "dns-detour-dial",
-				Tag:      s.Tag,
-				Message:  fmt.Sprintf("DNS-сервер %q: при заданном detour остальные dial-поля игнорируются — domain_resolver не будет применён", s.Tag),
-			})
-		}
-	}
-
 	defaultResolver := ""
 	if cfg.Route.DefaultDomainResolver != nil {
 		defaultResolver = strings.TrimSpace(cfg.Route.DefaultDomainResolver.Server)
