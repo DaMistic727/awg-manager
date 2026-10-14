@@ -345,6 +345,13 @@
 		width: fit-content;
 	}
 
+	/* Сегмент по содержимому: на узком экране SegmentedControl делит ширину
+	   поровну (flex 1 1 0), и у fit-content-группы длинная надпись получала
+	   меньше своей ширины — «Интер…» (F290). Каждой кнопке — её надпись. */
+	.form :global(.form-row-control > [role='group'] .segmented-control-btn) {
+		flex: 1 1 auto;
+	}
+
 	.w-port {
 		width: 108px;
 	}
