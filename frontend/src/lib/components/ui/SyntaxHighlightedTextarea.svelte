@@ -5,6 +5,8 @@
 	interface Props {
 		value?: string;
 		placeholder?: string;
+		/** Accessible name when no wrapping <label> names the textarea. */
+		ariaLabel?: string;
 		disabled?: boolean;
 		wrap?: 'pre' | 'pre-wrap';
 		highlight: (raw: string) => string;
@@ -18,6 +20,7 @@
 	let {
 		value = $bindable(''),
 		placeholder = '',
+		ariaLabel,
 		disabled = false,
 		wrap = 'pre-wrap',
 		highlight,
@@ -141,6 +144,7 @@
 		bind:value
 		rows={1}
 		{placeholder}
+		aria-label={ariaLabel}
 		{disabled}
 		spellcheck="false"
 		autocomplete="off"

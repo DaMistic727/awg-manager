@@ -167,6 +167,7 @@ geosite:xai`);
 			<SyntaxHighlightedTextarea
 				bind:value={value}
 				bind:textareaRef={rulesListTextarea}
+				ariaLabel={m.routing_singbox_list_label()}
 				highlight={highlightInlineRuleListContent}
 				wrap="pre-wrap"
 				class="rules-list-ta"

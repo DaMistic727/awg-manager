@@ -21,7 +21,7 @@
 		Zap
 	} from 'lucide-svelte';
 	import { Button, Dropdown } from '$lib/components/ui';
-	import { BindInterfacePicker } from '$lib/components/singbox';
+	import { BindInterfacePicker, OutboundJsonEditor } from '$lib/components/singbox';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { notifications } from '$lib/stores/notifications';
 
@@ -49,6 +49,9 @@
 	let protocol = $state<string>('');
 	let editableTag = $state('');
 	let initialOutboundFingerprint = $state('');
+	// JSON-режим (#683) правит тот же outbound, что и форма.
+	let rawMode = $state(false);
+	let rawInvalid = $state(false);
 
 	let canExportShareLink = $derived(EXPORTABLE_PROTOCOLS.has(protocol));
 	let hasUnsavedChanges = $derived(
@@ -77,7 +80,7 @@
 	});
 
 	async function save(): Promise<void> {
-		if (!outbound) return;
+		if (!outbound || rawInvalid) return;
 		const nextTag = editableTag.trim();
 		if (!nextTag) {
 			error = () => m.singbox_edit_tag_required();
@@ -93,6 +96,14 @@
 			if (tagChanged) {
 				fresh = await api.singboxRenameTunnel(tag, nextTag);
 				singboxTunnels.applyMutationResponse(fresh);
+				// Переименование уже на сервере: страница переезжает на новый tag,
+				// иначе при сбое update повторное «Сохранить» снова звало бы
+				// rename от старого, уже несуществующего имени (F644).
+				await goto(`/singbox/${encodeURIComponent(nextTag)}`, {
+					replaceState: true,
+					noScroll: true,
+					keepFocus: true,
+				});
 			}
 			if (outboundChanged) {
 				fresh = await api.singboxUpdateTunnel(nextTag, outbound);
@@ -166,6 +177,12 @@
 		setField(['bind_interface'], value.trim());
 	}
 
+	function applyRawOutbound(next: JsonRecord): void {
+		if (!outbound) return;
+		outbound = { ...next, tag: outbound.tag };
+		protocol = typeof next.type === 'string' ? next.type : '';
+	}
+
 	function outboundFingerprint(value: JsonRecord | null): string {
 		if (!value) return '';
 		const { tag: _tag, ...rest } = value;
@@ -213,10 +230,18 @@
 		</div>
 		<div class="header-actions">
 			<Button
+				variant="ghost"
+				size="md"
+				onclick={() => (rawMode = !rawMode)}
+				disabled={!outbound || rawInvalid}
+			>
+				{rawMode ? m.singbox_edit_mode_form() : m.singbox_edit_mode_json()}
+			</Button>
+			<Button
 				variant="secondary"
 				size="md"
 				onclick={copyShareLink}
-				disabled={!outbound || !canExportShareLink}
+				disabled={!outbound || !canExportShareLink || rawInvalid}
 				loading={copyingLink}
 				iconBefore={copyIcon}
 				title={copyLinkTitle}
@@ -227,7 +252,7 @@
 				variant="primary"
 				size="md"
 				onclick={save}
-				disabled={!outbound}
+				disabled={!outbound || rawInvalid}
 				loading={saving}
 			>
 				{m.common_save()}
@@ -241,6 +266,12 @@
 		<div class="py-12 text-center text-error-500">{error ? uiText(error) : m.singbox_edit_not_found()}</div>
 	{:else}
 		<form class="tab-form" onsubmit={(e) => { e.preventDefault(); save(); }}>
+			{#if rawMode}
+				<section class="card tunnel-section">
+					<SettingsSectionLabel label={m.singbox_edit_section_json()} icon={Boxes} tone="slate" header />
+					<OutboundJsonEditor value={outbound} onchange={applyRawOutbound} oninvalid={(v) => (rawInvalid = v)} />
+				</section>
+			{:else}
 				<section class="card tunnel-section">
 				<SettingsSectionLabel label={m.singbox_edit_section_main()} icon={Globe} tone="slate" header />
 
@@ -744,10 +775,6 @@
 				</section>
 			{/if}
 
-			{#if error}
-				<div class="error-msg">{uiText(error)}</div>
-			{/if}
-
 			<section class="card tunnel-section egress-section">
 				<SettingsSectionLabel label={m.singbox_bind_label()} icon={Waypoints} tone="slate" header />
 				<BindInterfacePicker
@@ -758,9 +785,15 @@
 				/>
 			</section>
 
+			{/if}
+
+			{#if error}
+				<div class="error-msg">{uiText(error)}</div>
+			{/if}
+
 			<div class="form-actions">
 				<Button variant="secondary" size="sm" onclick={() => goto('/?tab=singbox')}>{m.common_cancel()}</Button>
-				<Button variant="primary" size="sm" type="submit" loading={saving}>
+				<Button variant="primary" size="sm" type="submit" loading={saving} disabled={rawInvalid}>
 					{m.common_save()}
 				</Button>
 			</div>
@@ -916,11 +949,13 @@
 
 		.header-actions {
 			width: 100%;
+			flex-wrap: wrap;
 		}
 
+		/* Три кнопки не влезают в 360px поровну — тянутся по содержимому и
+		   переносятся. */
 		.header-actions :global(.btn) {
-			flex: 1 1 0;
-			min-width: 0;
+			flex: 1 1 auto;
 		}
 	}
 </style>

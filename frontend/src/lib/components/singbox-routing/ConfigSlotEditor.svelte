@@ -303,6 +303,7 @@
 				<SyntaxHighlightedTextarea
 					bind:value={text}
 					bind:textareaRef
+					ariaLabel={filename}
 					highlight={highlightJson}
 					indentMode="json"
 					wrap="pre"

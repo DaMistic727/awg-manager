@@ -559,6 +559,22 @@ func (h *SingboxHandler) enrichedTunnels(ctx context.Context) ([]singboxEnriched
 	return out, nil
 }
 
+// SingboxAddTunnelsRequest is the body of POST /api/singbox/tunnels.
+type SingboxAddTunnelsRequest struct {
+	Links string `json:"links" example:"vless://...\nhy2://..."`
+}
+
+// SingboxOutboundRequest is the body of PUT /api/singbox/tunnels.
+type SingboxOutboundRequest struct {
+	Outbound json.RawMessage `json:"outbound" swaggertype:"object"`
+}
+
+// SingboxShareLinkRequest is the body of POST /api/singbox/tunnels/share-link.
+type SingboxShareLinkRequest struct {
+	Outbound json.RawMessage `json:"outbound" swaggertype:"object"`
+	Label    string          `json:"label,omitempty"`
+}
+
 // AddTunnels handles POST /api/singbox/tunnels.
 // Body: {"links": "vless://...\nhy2://..."}. Returns imported tunnels and per-line errors.
 //
@@ -567,14 +583,13 @@ func (h *SingboxHandler) enrichedTunnels(ctx context.Context) ([]singboxEnriched
 //	@Accept			json
 //	@Produce		json
 //	@Security		CookieAuth
+//	@Param			body	body		SingboxAddTunnelsRequest	true	"Share links, one per line"
 //	@Success		200	{object}	APIEnvelope
 //	@Failure		400	{object}	APIErrorEnvelope
 //	@Failure		500	{object}	APIErrorEnvelope
 //	@Router			/singbox/tunnels [post]
 func (h *SingboxHandler) AddTunnels(w http.ResponseWriter, r *http.Request) {
-	body, ok := parseJSON[struct {
-		Links string `json:"links"`
-	}](w, r, http.MethodPost)
+	body, ok := parseJSON[SingboxAddTunnelsRequest](w, r, http.MethodPost)
 	if !ok {
 		return
 	}
@@ -687,6 +702,7 @@ func (h *SingboxHandler) GetTunnel(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		CookieAuth
+//	@Param			body	body		SingboxShareLinkRequest	true	"Outbound to export"
 //	@Success		200	{object}	APIEnvelope
 //	@Failure		400	{object}	APIErrorEnvelope
 //	@Failure		500	{object}	APIErrorEnvelope
@@ -696,10 +712,7 @@ func (h *SingboxHandler) ExportShareLink(w http.ResponseWriter, r *http.Request)
 		response.MethodNotAllowed(w)
 		return
 	}
-	body, ok := parseJSON[struct {
-		Outbound json.RawMessage `json:"outbound"`
-		Label    string          `json:"label,omitempty"`
-	}](w, r, http.MethodPost)
+	body, ok := parseJSON[SingboxShareLinkRequest](w, r, http.MethodPost)
 	if !ok {
 		return
 	}
@@ -727,14 +740,14 @@ func (h *SingboxHandler) ExportShareLink(w http.ResponseWriter, r *http.Request)
 //	@Accept			json
 //	@Produce		json
 //	@Security		CookieAuth
+//	@Param			tag		query		string					true	"Tunnel tag"
+//	@Param			body	body		SingboxOutboundRequest	true	"Outbound JSON (any sing-box options)"
 //	@Success		200	{object}	SingboxTunnelsResponse
 //	@Failure		400	{object}	APIErrorEnvelope
 //	@Failure		500	{object}	APIErrorEnvelope
 //	@Router			/singbox/tunnels [put]
 func (h *SingboxHandler) UpdateTunnel(w http.ResponseWriter, r *http.Request) {
-	body, ok := parseJSON[struct {
-		Outbound json.RawMessage `json:"outbound"`
-	}](w, r, http.MethodPut)
+	body, ok := parseJSON[SingboxOutboundRequest](w, r, http.MethodPut)
 	if !ok {
 		return
 	}

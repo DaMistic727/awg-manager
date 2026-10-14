@@ -4253,6 +4253,14 @@ definitions:
         example: 6e7f8a9b
         type: string
     type: object
+  api.SingboxAddTunnelsRequest:
+    properties:
+      links:
+        example: |-
+          vless://...
+          hy2://...
+        type: string
+    type: object
   api.SingboxConfigPreviewResponse:
     properties:
       json:
@@ -4689,6 +4697,11 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  api.SingboxOutboundRequest:
+    properties:
+      outbound:
+        type: object
     type: object
   api.SingboxProxiesListResponse:
     properties:
@@ -5925,6 +5938,13 @@ definitions:
       success:
         example: true
         type: boolean
+    type: object
+  api.SingboxShareLinkRequest:
+    properties:
+      label:
+        type: string
+      outbound:
+        type: object
     type: object
   api.SingboxStatusData:
     properties:
@@ -18647,6 +18667,13 @@ paths:
     post:
       consumes:
       - application/json
+      parameters:
+      - description: Share links, one per line
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.SingboxAddTunnelsRequest'
       produces:
       - application/json
       responses:
@@ -18670,6 +18697,18 @@ paths:
     put:
       consumes:
       - application/json
+      parameters:
+      - description: Tunnel tag
+        in: query
+        name: tag
+        required: true
+        type: string
+      - description: Outbound JSON (any sing-box options)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.SingboxOutboundRequest'
       produces:
       - application/json
       responses:
@@ -18793,6 +18832,13 @@ paths:
     post:
       consumes:
       - application/json
+      parameters:
+      - description: Outbound to export
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.SingboxShareLinkRequest'
       produces:
       - application/json
       responses:
