@@ -76,13 +76,10 @@ func NewKeeneticClient() *KeeneticClient {
 // здесь базовый транспорт клонируется, чтобы правка меняла ровно прокси и
 // ничего больше — остальные умолчания (пул, таймауты, h2) остаются как были.
 func routerTransport() http.RoundTripper {
-	base, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		// Чужой DefaultTransport подменить нечем, но и молча ходить через него
-		// нельзя: пустой транспорт хуже по умолчаниям, зато без прокси.
-		return &http.Transport{}
-	}
-	tr := base.Clone()
+	// В stdlib DefaultTransport всегда *http.Transport: запасной ветки нет —
+	// подменённый кем-то транспорт уронит утверждение громко, а не уведёт
+	// учётные данные администратора через пустые умолчания (P053).
+	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.Proxy = nil
 	return tr
 }

@@ -197,3 +197,19 @@ func TestAuthenticate_SendsAppUserAgent(t *testing.T) {
 		}
 	}
 }
+
+// Транспорт к роутеру — клон DefaultTransport без прокси: умолчания пула и
+// таймаутов сохраняются, прокси окружения не применяется (P053).
+func TestRouterTransport_ClonesDefaultWithoutProxy(t *testing.T) {
+	tr, ok := routerTransport().(*http.Transport)
+	if !ok {
+		t.Fatalf("тип %T", routerTransport())
+	}
+	if tr.Proxy != nil {
+		t.Fatal("прокси окружения применяется к роутеру")
+	}
+	def := http.DefaultTransport.(*http.Transport)
+	if tr.MaxIdleConns != def.MaxIdleConns || tr.IdleConnTimeout != def.IdleConnTimeout || tr.TLSHandshakeTimeout != def.TLSHandshakeTimeout {
+		t.Fatal("умолчания DefaultTransport потеряны")
+	}
+}
