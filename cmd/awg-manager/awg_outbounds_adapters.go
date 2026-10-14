@@ -270,7 +270,7 @@ func (v subscriptionBindValidator) ValidateBindInterface(ctx context.Context, na
 			return nil
 		}
 	}
-	return fmt.Errorf("bind_interface %q is not a selectable interface", name)
+	return fmt.Errorf("%w: %q", subscription.ErrBindNotSelectable, name)
 }
 
 // monitoringSingboxTunnelAdapter projects sing-box tunnels into the

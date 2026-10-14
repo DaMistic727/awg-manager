@@ -18527,7 +18527,8 @@ paths:
           schema:
             $ref: '#/definitions/api.APIEnvelope'
         "400":
-          description: path outside the allowed roots (PATH_DENIED)
+          description: path outside the allowed roots (PATH_DENIED), file unreadable
+            (FILE_UNREADABLE), url and path both set (INVALID_INPUT)
           schema:
             $ref: '#/definitions/api.APIErrorEnvelope'
         "502":
@@ -18683,6 +18684,11 @@ paths:
             $ref: '#/definitions/api.APIEnvelope'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIErrorEnvelope'
+        "422":
+          description: TrustTunnel config with several addresses — create a server
+            group (TRUSTTUNNEL_MULTI_ADDRESS)
           schema:
             $ref: '#/definitions/api.APIErrorEnvelope'
         "500":

@@ -1171,3 +1171,19 @@ func TestRouterAddRuleSet_UnsafeTag_Returns400(t *testing.T) {
 		t.Errorf("want code RULE_SET_TAG_UNSAFE in body: %s", rr.Body.String())
 	}
 }
+
+// F429: bind_interface вне каталога — ввод (400 BIND_NOT_SELECTABLE), а не
+// 500 INTERNAL_ERROR; у слота fakeip свой handleErr, проверяются оба.
+func TestHandleErr_BindNotSelectable400(t *testing.T) {
+	err := fmt.Errorf("%w: %q", router.ErrBindNotSelectable, "eth9")
+	for name, h := range map[string]func(http.ResponseWriter, string, error){
+		"router": newMockRouterHandler(&mockRouterSvc{}).handleErr,
+		"fakeip": newTestFakeIPConfigHandler(t).handleErr,
+	} {
+		rr := httptest.NewRecorder()
+		h(rr, "add-outbound", err)
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "BIND_NOT_SELECTABLE") {
+			t.Errorf("%s: status=%d body=%s", name, rr.Code, rr.Body.String())
+		}
+	}
+}

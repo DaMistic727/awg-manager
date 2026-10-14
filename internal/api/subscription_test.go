@@ -639,6 +639,27 @@ func TestSubscriptionHandler_PreviewPath(t *testing.T) {
 	}
 }
 
+// F417/F418: опечатка в пути (файла нет, каталог) — ввод пользователя (400
+// FILE_UNREADABLE), а не «провайдер недоступен» (502); оба источника в одном
+// теле — отказ, как у Create, а не молчаливый выбор файла.
+func TestSubscriptionHandler_PreviewPath_InputErrors(t *testing.T) {
+	h, _, dir := fileSourceHandler(t)
+	for _, tc := range []struct {
+		name string
+		req  PreviewURLRequest
+		code string
+	}{
+		{"нет файла", PreviewURLRequest{Path: filepath.Join(dir, "missing.txt")}, "FILE_UNREADABLE"},
+		{"каталог", PreviewURLRequest{Path: dir}, "FILE_UNREADABLE"},
+		{"оба источника", PreviewURLRequest{Path: writeLinkFile(t, dir, "sub.txt"), URL: "https://provider.example/sub"}, "INVALID_INPUT"},
+	} {
+		rr := postJSON(t, h.PreviewURL, "/api/singbox/subscriptions/preview", tc.req)
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), tc.code) {
+			t.Errorf("%s: status=%d body=%s, want 400 %s", tc.name, rr.Code, rr.Body.String(), tc.code)
+		}
+	}
+}
+
 // TestSubscriptionHandler_Create_TwoSources_400 фиксирует класс ошибки:
 // два источника в одном теле — ввод пользователя (400 INVALID_INPUT),
 // а не внутренний сбой (500 + Warn со свободным вводом в app-лог).

@@ -104,4 +104,9 @@ var (
 	// slot, so such a user rule could never match — it would only sit in the
 	// UI as an inert, confusing shadow rule. Mapped to 400 by the API.
 	ErrReservedInboundTag = errors.New("теги qos-* зарезервированы для QoS-классов")
+
+	// ErrBindNotSelectable — bind_interface вне каталога выбираемых
+	// интерфейсов: ошибка ввода (400), в отличие от сбоя чтения каталога
+	// (500) (F429).
+	ErrBindNotSelectable = errors.New("bind_interface is not a selectable interface")
 )

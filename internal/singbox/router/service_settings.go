@@ -444,7 +444,7 @@ func (s *ServiceImpl) validateBindInterface(ctx context.Context, name string) er
 			return nil
 		}
 	}
-	return fmt.Errorf("bind_interface %q is not a selectable interface", name)
+	return fmt.Errorf("%w: %q", ErrBindNotSelectable, name)
 }
 
 // foreignIfaces — отметки «Сторонний интерфейс» из настроек; без NDMS.

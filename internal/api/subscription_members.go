@@ -462,7 +462,7 @@ func (h *SubscriptionHandler) RestoreMembers(w http.ResponseWriter, r *http.Requ
 //	@Security		CookieAuth
 //	@Param			body	body		PreviewURLRequest	true	"URL or router file path, plus optional headers"
 //	@Success		200		{object}	APIEnvelope
-//	@Failure		400		{object}	APIErrorEnvelope	"path outside the allowed roots (PATH_DENIED)"
+//	@Failure		400		{object}	APIErrorEnvelope	"path outside the allowed roots (PATH_DENIED), file unreadable (FILE_UNREADABLE), url and path both set (INVALID_INPUT)"
 //	@Failure		502		{object}	APIErrorEnvelope	"fetch or parse failed"
 //	@Router			/singbox/subscriptions/preview [post]
 func (h *SubscriptionHandler) PreviewURL(w http.ResponseWriter, r *http.Request) {
@@ -475,20 +475,30 @@ func (h *SubscriptionHandler) PreviewURL(w http.ResponseWriter, r *http.Request)
 		response.ErrorWithStatus(w, http.StatusBadRequest, "bad request body", "INVALID_JSON")
 		return
 	}
+	// Оба источника сразу — отказ, как у Create: иначе превью показало бы
+	// файл, а создание отказало бы без видимой причины (F418).
+	if req.Path != "" && req.URL != "" {
+		response.ErrorWithStatus(w, http.StatusBadRequest, "url and path are mutually exclusive", "INVALID_INPUT")
+		return
+	}
 	var members []subscription.PreviewMember
 	var err error
 	if req.Path != "" {
 		members, err = h.svc.PreviewPath(r.Context(), req.Path)
-	} else {
-		members, err = h.svc.PreviewURL(r.Context(), req.URL, fromSubscriptionHeaders(req.Headers))
-	}
-	if err != nil {
-		// Путь вне корней — ввод пользователя, а не сбой апстрима: 502
-		// увёл бы UI в «провайдер недоступен».
+		// Путь вне корней, файла нет, каталог, бинарник — ввод пользователя,
+		// а не сбой апстрима: 502 увёл бы UI в «провайдер недоступен» (F417).
 		if errors.Is(err, sysfiles.ErrPathDenied) {
 			response.ErrorWithStatus(w, http.StatusBadRequest, err.Error(), "PATH_DENIED")
 			return
 		}
+		if err != nil {
+			response.ErrorWithStatus(w, http.StatusBadRequest, err.Error(), "FILE_UNREADABLE")
+			return
+		}
+	} else {
+		members, err = h.svc.PreviewURL(r.Context(), req.URL, fromSubscriptionHeaders(req.Headers))
+	}
+	if err != nil {
 		response.ErrorWithStatus(w, http.StatusBadGateway, err.Error(), "PREVIEW_FAILED")
 		return
 	}

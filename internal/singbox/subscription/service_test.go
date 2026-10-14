@@ -2186,6 +2186,31 @@ func TestService_Create_TrimsBindBeforeValidation(t *testing.T) {
 	}
 }
 
+// F429: имя вне каталога — ввод (ErrInvalidInput → 400), сбой чтения
+// каталога — нет (500): иначе отказ RCI выглядел бы опечаткой пользователя.
+func TestService_Create_BindNotSelectableIsInvalidInput(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		invalid bool
+	}{
+		{"нет в каталоге", fmt.Errorf("%w: %q", ErrBindNotSelectable, "eth9"), true},
+		{"сбой каталога", errors.New("rci: timeout"), false},
+	} {
+		svc, _ := newTestService(t)
+		svc.SetBindInterfaceValidator(&recordingBindValidator{err: tc.err})
+		_, err := svc.Create(context.Background(), CreateInput{
+			Label:         "bind-" + tc.name,
+			Inline:        "vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=a#A",
+			Enabled:       true,
+			BindInterface: "eth9",
+		})
+		if err == nil || errors.Is(err, ErrInvalidInput) != tc.invalid {
+			t.Errorf("%s: err=%v, ErrInvalidInput=%v want %v", tc.name, err, errors.Is(err, ErrInvalidInput), tc.invalid)
+		}
+	}
+}
+
 // Провал применения bind-only правки должен вернуть store в прежнее состояние:
 // иначе настройки показывают новый интерфейс, а в конфиге его нет.
 func TestService_Update_BindOnly_RollsBackOnFailure(t *testing.T) {

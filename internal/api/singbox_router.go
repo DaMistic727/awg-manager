@@ -294,6 +294,9 @@ func (h *SingboxRouterHandler) handleErr(w http.ResponseWriter, action string, e
 		// 400: правило принадлежит оверлею DNS-пресета — править/двигать его
 		// пользователь не может.
 		response.Error(w, err.Error(), "DNS_RULE_MANAGED")
+	case errors.Is(err, router.ErrBindNotSelectable):
+		// 400: bind_interface вне каталога — ввод пользователя, не сбой (F429).
+		response.Error(w, err.Error(), "BIND_NOT_SELECTABLE")
 	case errors.Is(err, router.ErrReservedInboundTag):
 		// 400: user rules must not claim the reserved qos-* inbound namespace
 		// (they'd be inert shadow rules — the managed slot merges first).

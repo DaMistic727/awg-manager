@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,8 +24,9 @@ func TestValidateBindInterfaceExists(t *testing.T) {
 	if err := s.validateBindInterface(context.Background(), "ipsec0"); err != nil {
 		t.Errorf("known interface rejected: %v", err)
 	}
-	if err := s.validateBindInterface(context.Background(), "nope0"); err == nil {
-		t.Error("unknown interface should be rejected")
+	// Сентинелом ввода: по нему API отвечает 400, а не 500 (F429).
+	if err := s.validateBindInterface(context.Background(), "nope0"); !errors.Is(err, ErrBindNotSelectable) {
+		t.Errorf("unknown interface should be rejected with ErrBindNotSelectable, got %v", err)
 	}
 }
 

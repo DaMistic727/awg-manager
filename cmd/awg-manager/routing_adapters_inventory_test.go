@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	ndmsquery "github.com/hoaxisr/awg-manager/internal/ndms/query"
 	"github.com/hoaxisr/awg-manager/internal/routing"
 	"github.com/hoaxisr/awg-manager/internal/singbox/router"
+	"github.com/hoaxisr/awg-manager/internal/singbox/subscription"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 )
 
@@ -107,7 +109,9 @@ func TestSubscriptionBindValidator_AcceptsOnlyBindable(t *testing.T) {
 	if err := newValidator().ValidateBindInterface(context.Background(), "ppp0"); err != nil {
 		t.Fatalf("bindable отвергнут: %v", err)
 	}
-	if err := newValidator().ValidateBindInterface(context.Background(), "OpkgTun0"); err == nil {
-		t.Fatal("чужое имя обязано отвергаться")
+	// Отказ — сентинелом ввода: по нему сервис подписок отвечает 400, а не
+	// 500 (F429).
+	if err := newValidator().ValidateBindInterface(context.Background(), "OpkgTun0"); !errors.Is(err, subscription.ErrBindNotSelectable) {
+		t.Fatalf("чужое имя обязано отвергаться ErrBindNotSelectable, got %v", err)
 	}
 }

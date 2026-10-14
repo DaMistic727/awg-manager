@@ -586,6 +586,7 @@ type SingboxShareLinkRequest struct {
 //	@Param			body	body		SingboxAddTunnelsRequest	true	"Share links, one per line"
 //	@Success		200	{object}	APIEnvelope
 //	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		422	{object}	APIErrorEnvelope	"TrustTunnel config with several addresses — create a server group (TRUSTTUNNEL_MULTI_ADDRESS)"
 //	@Failure		500	{object}	APIErrorEnvelope
 //	@Router			/singbox/tunnels [post]
 func (h *SingboxHandler) AddTunnels(w http.ResponseWriter, r *http.Request) {

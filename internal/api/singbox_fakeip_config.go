@@ -58,6 +58,9 @@ func (h *SingboxFakeIPConfigHandler) handleErr(w http.ResponseWriter, action str
 		// 400: тег inline-набора именует файл его артефакта — иначе два набора
 		// делят один файл и затирают правила друг друга (F434, #941).
 		response.Error(w, err.Error(), "RULE_SET_TAG_UNSAFE")
+	case errors.Is(err, router.ErrBindNotSelectable):
+		// 400: bind_interface вне каталога — ввод пользователя, не сбой (F429).
+		response.Error(w, err.Error(), "BIND_NOT_SELECTABLE")
 	case errors.Is(err, router.ErrInvalidMatchers),
 		errors.Is(err, router.ErrDNSInvalidServer):
 		response.Error(w, err.Error(), "INVALID_MATCHERS")
