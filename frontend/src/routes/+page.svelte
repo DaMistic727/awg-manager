@@ -76,7 +76,7 @@
 		awgToggleTint,
 	} from '$lib/utils/awgPingStatus';
 	import { awgManagedStatusDot } from '$lib/utils/statusDot';
-	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
+	import { resolveSubscriptionMemberTag, subscriptionName } from '$lib/utils/subscriptionMember';
 	import { nativewgUnavailableHint } from '$lib/utils/backendAvailability';
 	import {
 		SINGBOX_LAYOUT_STORAGE_KEY,
@@ -474,7 +474,7 @@
 		const id = pendingSubscriptionDelete;
 		if (!id) return '';
 		const s = subscriptionsList.find((x) => x.id === id);
-		return s ? s.label || s.url : id;
+		return s ? subscriptionName(s) : id;
 	});
 
 	// Указатель «сейчас активен» меняет сам sing-box, и не чаще своего

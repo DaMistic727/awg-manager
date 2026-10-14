@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { subscriptionName } from '$lib/utils/subscriptionMember';
 	import { m } from '$lib/i18n';
 	import RichText from '$lib/components/ui/RichText.svelte';
 	import type { Subscription, SubscriptionGroup } from '$lib/types';
@@ -77,7 +78,7 @@
 	}
 
 	function subLabels(g: SubscriptionGroup): string {
-		const byId = new Map(subscriptions.map((s) => [s.id, s.label || s.url || s.id]));
+		const byId = new Map(subscriptions.map((s) => [s.id, subscriptionName(s)]));
 		const names = g.useSubscriptionIds.map((id) => byId.get(id) ?? id);
 		return names.length > 0 ? names.join(', ') : m.subscriptions_groups_no_subs();
 	}

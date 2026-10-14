@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { subscriptionName } from '$lib/utils/subscriptionMember';
     import { m } from '$lib/i18n';
     import RichText from '$lib/components/ui/RichText.svelte';
     import { untrack } from 'svelte';
@@ -734,7 +735,7 @@
     <p class="delete-confirm-text">
         <RichText
             text={m.subscriptions_delete_confirm_message({
-                label: subscription.label || subscription.url || subscription.path,
+                label: subscriptionName(subscription),
                 index: subscription.proxyIndex,
             })}
         />

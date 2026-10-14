@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { subscriptionName } from '$lib/utils/subscriptionMember';
 	import { m } from '$lib/i18n';
 	import {
 		DEFAULT_SUBSCRIPTION_URLTEST,
@@ -220,7 +221,7 @@
 								checked={selectedIds.includes(sub.id)}
 								onchange={() => toggleSub(sub.id)}
 							/>
-							<span class="sub-label">{sub.label || sub.url || sub.id}</span>
+							<span class="sub-label">{subscriptionName(sub)}</span>
 							{#if !sub.enabled}<span class="sub-off-badge">{m.subscriptions_group_modal_sub_disabled()}</span>{/if}
 							<span class="sub-count">{m.subscriptions_servers_short({ count: sub.members?.length ?? 0 })}</span>
 						</label>

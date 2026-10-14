@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { subscriptionName } from '$lib/utils/subscriptionMember';
 	import { m, uiText, type UiText } from '$lib/i18n';
 	import { page } from '$app/stores';
 	import { startVisiblePoll } from '$lib/utils/visiblePoll';
@@ -300,7 +301,7 @@
 	{:else if !subscription && error}
 		<div class="err">{uiText(error)}</div>
 	{:else if subscription}
-		<PageHeader title={subscription.label || subscription.url} backTo="/?tab=subscriptions" />
+		<PageHeader title={subscriptionName(subscription)} backTo="/?tab=subscriptions" />
 		{@const excludedCount = subscription.excludedMembers?.length ?? 0}
 		<Tabs
 			tabs={[

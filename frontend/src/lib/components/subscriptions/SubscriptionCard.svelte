@@ -17,7 +17,7 @@
 	} from '$lib/components/tunnels';
 	import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
 	import { singboxDelayStatusDot } from '$lib/utils/statusDot';
-	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
+	import { resolveSubscriptionMemberTag, subscriptionName } from '$lib/utils/subscriptionMember';
 	import { isCardNestedInteraction } from '$lib/utils/cardClick';
 	import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
 
@@ -203,7 +203,7 @@
 			<td class="tunnel-list-cell tunnel-list-cell--name lc lc-name">
 				<div class="tunnel-list-name-stack">
 					<TunnelTitleRow
-						title={subscription.label || subscription.url}
+						title={subscriptionName(subscription)}
 						dotVariant={statusDot.variant}
 						dotPulse={statusDot.pulse}
 						staticTitle
@@ -278,11 +278,11 @@
 				<TunnelListActions
 					onEdit={openSettings}
 					editLabel={m.common_edit()}
-					editTitle={m.subscriptions_card_edit_title({ name: subscription.label || subscription.url })}
+					editTitle={m.subscriptions_card_edit_title({ name: subscriptionName(subscription) })}
 					onTest={() => (diagnosticsOpen = true)}
-					testTitle={m.subscriptions_card_test_title({ name: subscription.label || subscription.url })}
+					testTitle={m.subscriptions_card_test_title({ name: subscriptionName(subscription) })}
 					onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
-					deleteTitle={m.subscriptions_card_delete_title({ name: subscription.label || subscription.url })}
+					deleteTitle={m.subscriptions_card_delete_title({ name: subscriptionName(subscription) })}
 				/>
 			</td>
 	</tr>
@@ -310,7 +310,7 @@
 	<div class="inactive-header-dense">
 		<div class="inactive-header-main">
 			<div class="inactive-title-row">
-				<h3 class="inactive-title">{subscription.label || subscription.url}</h3>
+				<h3 class="inactive-title">{subscriptionName(subscription)}</h3>
 				<Badge variant="accent" size="sm">{sourceKindLabel}</Badge>
 			</div>
 			<div class="inactive-meta-dense mono">
@@ -365,11 +365,11 @@
 			variant="labeled"
 			onEdit={openSettings}
 			editLabel={m.common_edit()}
-			editTitle={m.subscriptions_card_edit_title({ name: subscription.label || subscription.url })}
+			editTitle={m.subscriptions_card_edit_title({ name: subscriptionName(subscription) })}
 			onTest={() => (diagnosticsOpen = true)}
-			testTitle={m.subscriptions_card_test_title({ name: subscription.label || subscription.url })}
+			testTitle={m.subscriptions_card_test_title({ name: subscriptionName(subscription) })}
 			onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
-			deleteTitle={m.subscriptions_card_delete_title({ name: subscription.label || subscription.url })}
+			deleteTitle={m.subscriptions_card_delete_title({ name: subscriptionName(subscription) })}
 		/>
 	</div>
 	{/if}
@@ -392,7 +392,7 @@
 >
 	<div class="inactive-header">
 		<div class="inactive-header-main">
-			<h3 class="inactive-title">{subscription.label || subscription.url}</h3>
+			<h3 class="inactive-title">{subscriptionName(subscription)}</h3>
 			<div class="inactive-meta-line">
 				{#if proxyIface}
 					<span class="inactive-iface mono">{proxyIface}{#if kernelIface} · {kernelIface}{/if}</span>
@@ -453,11 +453,11 @@
 			variant="labeled"
 			onEdit={openSettings}
 			editLabel={m.common_edit()}
-			editTitle={m.subscriptions_card_edit_title({ name: subscription.label || subscription.url })}
+			editTitle={m.subscriptions_card_edit_title({ name: subscriptionName(subscription) })}
 			onTest={() => (diagnosticsOpen = true)}
-			testTitle={m.subscriptions_card_test_title({ name: subscription.label || subscription.url })}
+			testTitle={m.subscriptions_card_test_title({ name: subscriptionName(subscription) })}
 			onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
-			deleteTitle={m.subscriptions_card_delete_title({ name: subscription.label || subscription.url })}
+			deleteTitle={m.subscriptions_card_delete_title({ name: subscriptionName(subscription) })}
 		/>
 	</div>
 </div>
