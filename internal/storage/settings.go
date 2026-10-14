@@ -1036,6 +1036,22 @@ func (s *SettingsStore) saveUnlocked(settings *Settings) error {
 		return err
 	}
 
+	// Холостая запись — износ флеша (F645): мутатор, ничего не поменявший,
+	// давал бы полную перезапись файла и .bak. Сравнение по байтам файла, а
+	// не по структуре — та же причина, что у secretsDropped ниже (копии
+	// поверхностные). Права — тоже условие: запись чинит их у файла старой
+	// версии. И .bak не должен нести снятого секрета: если его перезапись
+	// когда-то сорвалась, лечит её любая следующая запись — пропускать её
+	// нельзя.
+	if fi, err := os.Stat(s.path); err == nil && fi.Mode().Perm() == SecretFilePermission {
+		if cur, err := os.ReadFile(s.path); err == nil && bytes.Equal(cur, buf.Bytes()) {
+			if bak, err := os.ReadFile(s.path + ".bak"); err != nil || !secretsDropped(bak, buf.Bytes()) {
+				s.settings = settings
+				return nil
+			}
+		}
+	}
+
 	// Keep the previous good file as .bak (hardlink: no data copy, the old
 	// inode survives the rename below). Load() falls back to it if the main
 	// file is ever found corrupt after a power loss.
