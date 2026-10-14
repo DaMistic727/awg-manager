@@ -199,19 +199,32 @@ func (idx sbIndex) whyNoGroup(tag string, routerErr error) error {
 	return nil
 }
 
+// tagKind — вид тега в конфигурации; значения уходят в ответ MCP как есть.
+// Именованный тип, а не строка: ветвления по виду проверяет компилятор, а не
+// совпадение литералов в трёх местах (MC13).
+type tagKind string
+
+const (
+	kindUnknown tagKind = ""
+	kindGroup   tagKind = "group"
+	kindMember  tagKind = "member"
+	kindProxy   tagKind = "proxy"
+	kindOther   tagKind = "other"
+)
+
 // kindOf classifies a tag from configuration, never from the engine, so
 // that a mistyped tag gets a precise answer while sing-box is down. The
 // first match wins: group, member, proxy.
-func (idx sbIndex) kindOf(tag string) string {
+func (idx sbIndex) kindOf(tag string) tagKind {
 	switch {
 	case hasKey(idx.groups, tag):
-		return "group"
+		return kindGroup
 	case idx.isMember[tag]:
-		return "member"
+		return kindMember
 	case hasKey(idx.proxies, tag):
-		return "proxy"
+		return kindProxy
 	}
-	return ""
+	return kindUnknown
 }
 
 func hasKey[V any](m map[string]V, k string) bool { _, ok := m[k]; return ok }
@@ -301,9 +314,10 @@ func (l *Local) ListSingboxOutbounds(ctx context.Context) ([]mcpsrv.SingboxOutbo
 
 // groupMember describes one member of a group.
 func (idx sbIndex) groupMember(tag, active string, proxies map[string]singbox.ClashProxy, runtimeKnown bool) mcpsrv.SingboxGroupMember {
-	m := mcpsrv.SingboxGroupMember{Tag: tag, Kind: idx.kindOf(tag)}
-	switch m.Kind {
-	case "member":
+	kind := idx.kindOf(tag)
+	m := mcpsrv.SingboxGroupMember{Tag: tag, Kind: string(kind)}
+	switch kind {
+	case kindMember:
 		// Every field here is the provider's text: for a sing-box JSON or
 		// Clash YAML subscription the daemon checks only that the server
 		// is not empty, and transport is transport.type verbatim.
@@ -311,15 +325,15 @@ func (idx sbIndex) groupMember(tag, active string, proxies map[string]singbox.Cl
 		m.Label = sanitizeLabel(info.Label)
 		m.Protocol, m.Server, m.Port = token(info.Protocol), hostShaped(info.Server), int(info.Port)
 		m.Transport, m.Security = token(info.Transport), token(info.Security)
-	case "proxy":
+	case kindProxy:
 		t := idx.proxies[tag]
 		m.Protocol, m.Server, m.Port = token(t.Protocol), hostShaped(t.Server), t.Port
 		m.Transport, m.Security = token(t.Transport), token(t.Security)
-	case "":
+	case kindUnknown:
 		// In the group's configuration and nowhere else we can see: a
 		// built-in such as direct, or an AWG outbound. Calling it a proxy
 		// would send the agent to list_singbox_tunnels, where it is not.
-		m.Kind = "other"
+		m.Kind = string(kindOther)
 	}
 	if !runtimeKnown {
 		return m
@@ -351,9 +365,9 @@ func (l *Local) GetSingboxOutbound(ctx context.Context, tag string) (mcpsrv.Sing
 	o, ok := idx.groups[tag]
 	if !ok {
 		switch idx.kindOf(tag) {
-		case "member":
+		case kindMember:
 			return mcpsrv.SingboxOutboundDetail{}, fmt.Errorf("%q is a single server, not a group (groups are in list_singbox_outbounds)", tag)
-		case "proxy":
+		case kindProxy:
 			return mcpsrv.SingboxOutboundDetail{}, fmt.Errorf("%q is a single proxy, not a group (groups are in list_singbox_outbounds)", tag)
 		}
 		if why, ok := idx.notOutbound[tag]; ok {
@@ -391,7 +405,7 @@ func (l *Local) CheckSingboxDelay(ctx context.Context, tag string) (mcpsrv.Singb
 		return mcpsrv.SingboxDelay{}, err
 	}
 	kind := idx.kindOf(tag)
-	if kind == "" {
+	if kind == kindUnknown {
 		if why, ok := idx.notOutbound[tag]; ok {
 			return mcpsrv.SingboxDelay{}, fmt.Errorf("%q cannot be probed: %s", tag, why)
 		}
@@ -422,15 +436,15 @@ func (l *Local) CheckSingboxDelay(ctx context.Context, tag string) (mcpsrv.Singb
 		// The periodic sweep shares the prober and holds a slow outbound's
 		// tag for several seconds; nothing was measured here, so neither
 		// verdict applies.
-		return mcpsrv.SingboxDelay{Tag: tag, Kind: kind, Busy: true}, nil
+		return mcpsrv.SingboxDelay{Tag: tag, Kind: string(kind), Busy: true}, nil
 	}
 	if err != nil {
 		return mcpsrv.SingboxDelay{}, err
 	}
 	// CheckOne normalises a timeout to 0 ms, so 0 means silence — not a
 	// round trip that took no time.
-	out := mcpsrv.SingboxDelay{Tag: tag, Kind: kind, Reachable: ms > 0, DelayMs: ms}
-	if kind == "group" {
+	out := mcpsrv.SingboxDelay{Tag: tag, Kind: string(kind), Reachable: ms > 0, DelayMs: ms}
+	if kind == kindGroup {
 		// Read after the probe: a urltest group may have just re-chosen.
 		if proxies, answered := l.clashProxies(); answered {
 			out.Via = proxies[tag].Now
