@@ -1037,3 +1037,24 @@ func TestEnsureWG_PublishesAfterPartialWorkOnFailure(t *testing.T) {
 		t.Fatal("снос состоялся, а событие потеряно: фронт покажет снесённый туннель до перезагрузки")
 	}
 }
+
+// F390: голый IPv6 получает порт режима и скобки — проверка по двоеточию
+// пропускала его без порта.
+func TestLink_IPv6PeerGetsModePort(t *testing.T) {
+	user := instancestore.ServerUser{Password: "abonent"}
+	rec := serverRecord(roles.WdttServerConfig{
+		Listen: "0.0.0.0:56002", DirectListen: "0.0.0.0:56004",
+		WgPort: 56001, RelayMode: ConnModeWG,
+	}, user)
+	h, _, _, _ := newTestHandler(t, rec)
+	rr := httptest.NewRecorder()
+	h.Link(rr, post(t, `{"peer":"2001:db8::1","password":"abonent"}`), rec.Key())
+
+	data, msg, code := decodeEnvelope(t, rr)
+	if code != "" {
+		t.Fatalf("отказ %s: %s", code, msg)
+	}
+	if data["peer"] != "[2001:db8::1]:56004" {
+		t.Fatalf("peer=%v want [2001:db8::1]:56004", data["peer"])
+	}
+}

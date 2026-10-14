@@ -448,10 +448,26 @@ func normalizePeer(peer string) string {
 	if peer == "" {
 		return peer
 	}
-	if strings.Contains(peer, ":") {
+	return WithPort(peer, "56000")
+}
+
+// WithPort дописывает port, если его нет. Признак «порт есть» — разбор
+// net.SplitHostPort, а не двоеточие: у голого IPv6 двоеточий много, и такой
+// адрес уезжал в ссылку без порта (F390). Литерал IPv6 берётся в скобки.
+// Строка с двоеточиями, которая не разбирается и не является IPv6
+// (`2001:db8::1:56000` — след старой ошибки), остаётся как есть: её разберёт
+// запасной путь splitPeerHostPort. `v6:порт` без скобок неоднозначен, и при
+// порте до 4 цифр (`2001:db8::1:443` — тоже валидный IPv6) читается как
+// адрес: порт у литерала IPv6 пишется только в скобках.
+func WithPort(peer, port string) string {
+	if _, _, err := net.SplitHostPort(peer); err == nil {
 		return peer
 	}
-	return peer + ":56000"
+	host := strings.TrimSuffix(strings.TrimPrefix(peer, "["), "]")
+	if strings.Contains(host, ":") && net.ParseIP(host) == nil {
+		return peer
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // PeersEqual compares WDTT peer addresses with default port normalization.

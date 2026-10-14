@@ -217,6 +217,8 @@ func TestBuildLink_Rejections(t *testing.T) {
 func TestBuildLink_PortAppendedForIPv6(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"[2001:db8::1]", "[2001:db8::1]:56123"},
+		{"2001:db8::1", "[2001:db8::1]:56123"},
+		{"2001:db8::1:56000", "2001:db8::1:56000"},
 		{"[2001:db8::1]:56000", "[2001:db8::1]:56000"},
 		{"vpn.example.org", "vpn.example.org:56123"},
 		{"vpn.example.org:1", "vpn.example.org:1"},

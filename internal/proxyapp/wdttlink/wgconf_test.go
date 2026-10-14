@@ -100,3 +100,25 @@ func TestExtractInterfaceAddress(t *testing.T) {
 		t.Fatalf("без [Interface] ожидали пусто, got %q", got)
 	}
 }
+
+// F390: «порт есть» — по разбору адреса, а не по двоеточию. Голый IPv6
+// уходил в ссылку без порта; литерал берётся в скобки. След старой ошибки
+// (`v6:порт` без скобок) не трогается — его разбирает splitPeerHostPort.
+func TestNormalizePeerIPv6(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"2001:db8::1", "[2001:db8::1]:56000"},
+		{"[2001:db8::1]", "[2001:db8::1]:56000"},
+		{"[2001:db8::1]:443", "[2001:db8::1]:443"},
+		{"1.2.3.4", "1.2.3.4:56000"},
+		{"vpn.example.org:1", "vpn.example.org:1"},
+		{"2001:db8::1:56000x", "2001:db8::1:56000x"},
+	} {
+		if got := normalizePeer(tc.in); got != tc.want {
+			t.Errorf("normalizePeer(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	host, port, err := splitPeerHostPort(normalizePeer("2001:db8::1"))
+	if err != nil || host != "2001:db8::1" || port != 56000 {
+		t.Errorf("split = (%q, %d, %v), want (2001:db8::1, 56000)", host, port, err)
+	}
+}

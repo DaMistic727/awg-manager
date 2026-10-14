@@ -119,9 +119,7 @@ func (b *Builder) BuildLink(ctx context.Context, rec instancestore.Record, req L
 		}
 		peer = ip
 	}
-	if !strings.Contains(peer, ":") {
-		peer = peer + ":" + strconv.Itoa(linkPort)
-	}
+	peer = WithPort(peer, strconv.Itoa(linkPort))
 
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
