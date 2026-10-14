@@ -150,3 +150,15 @@ func TestAddPeer_RejectsDNSThatIsNotAnAddressList(t *testing.T) {
 		t.Error("UpdatePeer accepted an injected dns")
 	}
 }
+
+// F296: адрес пира — хост; /24 на роутер ушёл бы голым хостом, а в записи
+// остался бы с маской и прошёл мимо проверки занятости по строке.
+func TestAddPeer_RejectsNonHostTunnelIP(t *testing.T) {
+	svc, store, _ := newCreateTestService(t)
+	if err := store.AddManagedServer(storage.ManagedServer{InterfaceName: "Wireguard1", Address: "10.0.0.1", Mask: "255.255.255.0", ListenPort: 51820, Policy: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddPeer(context.Background(), "Wireguard1", AddPeerRequest{Description: "p", TunnelIP: "10.0.0.2/24"}); err == nil || !strings.Contains(err.Error(), "host address") {
+		t.Fatalf("AddPeer с /24: %v", err)
+	}
+}

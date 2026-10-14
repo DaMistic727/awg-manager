@@ -671,9 +671,14 @@ func (s *Service) findPeerIndex(server *storage.ManagedServer, pubkey string) in
 }
 
 func (s *Service) validateTunnelIP(server *storage.ManagedServer, tunnelIP string) error {
-	ip, _, err := net.ParseCIDR(tunnelIP)
+	ip, ipNet, err := net.ParseCIDR(tunnelIP)
 	if err != nil {
 		return fmt.Errorf("invalid tunnel IP (must be CIDR, e.g. 10.0.0.2/32): %w", err)
+	}
+	// Адрес пира — хост: на роутер уходит голый адрес, и `/24` в записи
+	// расходился бы с ним и проходил мимо проверки занятости по строке (F296).
+	if ones, bits := ipNet.Mask.Size(); ones != bits {
+		return fmt.Errorf("tunnel IP %s must be a host address (/%d)", tunnelIP, bits)
 	}
 
 	// Check it's in the server's subnet

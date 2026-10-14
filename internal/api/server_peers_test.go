@@ -695,6 +695,7 @@ func TestValidateServerPeerTunnelIP(t *testing.T) {
 		"10.9.0.0/32":   "network address",
 		"10.9.0.255/32": "broadcast address",
 		"10.9.0.2":      "invalid tunnel IP",
+		"10.9.0.2/24":   "must be a host address", // F296: на роутер уходит голый хост
 	} {
 		err := h.validateServerPeerTunnelIP(srv, ip)
 		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
@@ -704,5 +705,35 @@ func TestValidateServerPeerTunnelIP(t *testing.T) {
 	// Подсеть неизвестна — проверять не с чем.
 	if err := h.validateServerPeerTunnelIP(&ndms.WireguardServer{}, "10.9.1.2/32"); err != nil {
 		t.Errorf("unknown subnet: %v", err)
+	}
+}
+
+// F296: пир, записанный до проверки маски с /24, остаётся правимым — форма
+// эхом шлёт сохранённый адрес, и правка описания не упирается в маску. Новый
+// адрес с не-хостовой маской отвергается.
+func TestServersHandler_UpdateServerPeer_LegacyMaskEditable(t *testing.T) {
+	h, store, _, _, _ := newServersPeerHarness(t, true)
+	if err := store.SetServerPeerSecret(harnessServerID, peerFixturePubKey, storage.ServerPeerSecret{
+		PrivateKey: "k", TunnelIP: "10.9.0.2/24",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rr := putServerPeer(t, h, peerFixturePubKey, `{"description":"phone2","tunnelIP":"10.9.0.2/24"}`); rr.Code != http.StatusOK {
+		t.Fatalf("правка описания у пира с /24: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := putServerPeer(t, h, peerFixturePubKey, `{"description":"phone2","tunnelIP":"10.9.0.3/24"}`); rr.Code != http.StatusBadRequest {
+		t.Fatalf("новый адрес с /24: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	// Тот же хост, маска хоста — старый /24 чинится до /32.
+	if rr := putServerPeer(t, h, peerFixturePubKey, `{"description":"phone2","tunnelIP":"10.9.0.2/32"}`); rr.Code != http.StatusOK {
+		t.Fatalf("починка /24 → /32: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if sec, _ := store.GetServerPeerSecret(harnessServerID, peerFixturePubKey); sec.TunnelIP != "10.9.0.2/32" {
+		t.Fatalf("в записи %q, ждали 10.9.0.2/32", sec.TunnelIP)
+	}
+	// Тот же хост, /24 поверх /32 — мимо проверки адреса в запись не попадает.
+	putServerPeer(t, h, peerFixturePubKey, `{"description":"phone2","tunnelIP":"10.9.0.2/24"}`)
+	if sec, _ := store.GetServerPeerSecret(harnessServerID, peerFixturePubKey); sec.TunnelIP != "10.9.0.2/32" {
+		t.Fatalf("/24 доехал до записи мимо проверки: %q", sec.TunnelIP)
 	}
 }

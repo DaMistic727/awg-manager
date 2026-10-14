@@ -380,9 +380,16 @@ func (h *ServersHandler) UpdateServerPeer(w http.ResponseWriter, r *http.Request
 		}
 		return peerTunnelHostIP(peer)
 	}
+	// Смена адреса — смена хоста, а не строки: форма эхом шлёт сохранённое
+	// значение, у записей до F296 — с маской вроде /24, и правка одного
+	// описания не должна упираться в проверку маски.
 	ipChange := func() bool {
 		old := tunnelHost()
-		return req.TunnelIP != "" && req.TunnelIP != old+"/32" && req.TunnelIP != old
+		if req.TunnelIP == "" || req.TunnelIP == old {
+			return false
+		}
+		ip, _, err := net.ParseCIDR(req.TunnelIP)
+		return err != nil || ip.String() != old
 	}
 	reconcile := needsReconcile()
 	unlock := func() {}
@@ -568,7 +575,10 @@ func (h *ServersHandler) UpdateServerPeer(w http.ResponseWriter, r *http.Request
 	// wrong .conf after reboot.
 	if hasSecret {
 		changed := false
-		if req.TunnelIP != "" && sec.TunnelIP != req.TunnelIP {
+		// Тот же хост с другой маской проверку адреса не проходил (ipChange по
+		// хосту): записывается только хостовая форма — иначе /24 мимо проверки
+		// доехал бы до записи (F296); /24 → /32 у пира до F296 — записывается.
+		if req.TunnelIP != "" && sec.TunnelIP != req.TunnelIP && (wantIPChange || isHostCIDR(req.TunnelIP)) {
 			sec.TunnelIP = req.TunnelIP
 			changed = true
 		}
@@ -940,10 +950,26 @@ func peerTunnelIPInUse(server *ndms.WireguardServer, tunnelIP string, storedHost
 	return false
 }
 
+// isHostCIDR — CIDR с маской хоста (/32, для IPv6 /128).
+func isHostCIDR(s string) bool {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		return false
+	}
+	ones, bits := n.Mask.Size()
+	return ones == bits
+}
+
 func (h *ServersHandler) validateServerPeerTunnelIP(server *ndms.WireguardServer, tunnelIP string) error {
-	ip, _, err := net.ParseCIDR(tunnelIP)
+	ip, ipNet, err := net.ParseCIDR(tunnelIP)
 	if err != nil {
 		return fmt.Errorf("invalid tunnel IP (must be CIDR, e.g. 10.0.0.2/32): %w", err)
+	}
+	// Адрес пира — хост: на роутер уходит голый адрес без маски, и `/24` в
+	// записи расходился бы с ним (F296).
+	if !isHostCIDR(tunnelIP) {
+		_, bits := ipNet.Mask.Size()
+		return fmt.Errorf("tunnel IP %s must be a host address (/%d)", tunnelIP, bits)
 	}
 	serverNet := serverSubnetOf(server)
 	if serverNet == nil {
