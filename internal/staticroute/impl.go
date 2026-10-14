@@ -263,8 +263,7 @@ func (s *ServiceImpl) SetEnabled(ctx context.Context, id string, enabled bool) e
 		return nil // no change
 	}
 
-	// Список не прочитан — отказ ДО записи (F565), как в Update. Правим
-	// копию: GetRouteList отдаёт указатель в кэш хранилища.
+	// Список не прочитан — отказ ДО записи (F565), как в Update.
 	confirmed, cerr := s.confirmIfaces(ctx, rl.TunnelID)
 	if cerr != nil {
 		return fmt.Errorf("set enabled: %w", cerr)

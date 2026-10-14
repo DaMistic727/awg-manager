@@ -210,6 +210,14 @@ func TestServiceImpl_CRUD(t *testing.T) {
 	if got.Name != "test list" {
 		t.Errorf("Name = %q", got.Name)
 	}
+	// Результат — копия: правка поля и элемента среза не меняет кэш мимо
+	// записи и вне opMu (F667).
+	got.Backend = "hydraroute"
+	got.ManualDomains[0] = "changed.example"
+	created.ManualDomains[0] = "changed.example"
+	if again, _ := svc.Get(ctx, "list_1"); again.Backend == "hydraroute" || again.ManualDomains[0] == "changed.example" {
+		t.Fatalf("кэш изменён через результат Get: %+v", again)
+	}
 
 	// List
 	all, err := svc.List(ctx)

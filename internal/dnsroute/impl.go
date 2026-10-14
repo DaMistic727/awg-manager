@@ -243,9 +243,12 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 	}
 
 	// Re-read the list after refresh (Domains may have been updated).
+	// Копия: ответ кодируется вне opMu, а обновление подписок пишет в кэш
+	// на месте (F667).
 	for i := range data.Lists {
 		if data.Lists[i].ID == list.ID {
-			return &data.Lists[i], nil
+			l := data.Lists[i].clone()
+			return &l, nil
 		}
 	}
 	return &list, nil
@@ -263,7 +266,10 @@ func (s *ServiceImpl) Get(ctx context.Context, id string) (*DomainList, error) {
 
 	for i := range data.Lists {
 		if data.Lists[i].ID == id {
-			return &data.Lists[i], nil
+			// Копия, а не указатель в кэш: правка результата меняла бы
+			// кэш без записи на диск и вне opMu (F667).
+			l := data.Lists[i].clone()
+			return &l, nil
 		}
 	}
 	return nil, fmt.Errorf("dns route list %q not found", id)
@@ -434,7 +440,9 @@ func (s *ServiceImpl) Update(ctx context.Context, list DomainList) (*DomainList,
 		s.logError("update", list.ID, "Reconcile failed", err.Error())
 	}
 
-	return &list, nil
+	// Срезы list общие с кэшем (подписки, домены): ответ — копия (F667).
+	out := list.clone()
+	return &out, nil
 }
 
 // Delete removes a domain list by ID, persists changes, and reconciles.

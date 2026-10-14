@@ -116,3 +116,25 @@ func readFileOrFail(t *testing.T, path string) string {
 	}
 	return string(raw)
 }
+
+// Результат чтения — копия: правка поля или элемента подсетей не меняет кэш
+// хранилища мимо записи (F585).
+func TestStaticRouteStore_ReadsAreCopies(t *testing.T) {
+	s := NewStaticRouteStore(t.TempDir())
+	if err := s.AddRouteList(StaticRouteList{ID: "srl1", Name: "A", Subnets: []string{"192.0.2.0/24"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetRouteList("srl1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got.Name = "B"
+	got.Subnets[0] = "198.51.100.0/24"
+	all, _ := s.ListRouteLists()
+	all[0].Subnets[0] = "203.0.113.0/24"
+
+	again, _ := s.GetRouteList("srl1")
+	if again.Name != "A" || again.Subnets[0] != "192.0.2.0/24" {
+		t.Fatalf("кэш изменён через результат чтения: %+v", again)
+	}
+}

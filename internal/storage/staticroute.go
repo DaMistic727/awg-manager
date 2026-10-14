@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -116,16 +117,22 @@ func (s *StaticRouteStore) saveUnlocked(data *StaticRouteData) error {
 	return nil
 }
 
-// ListRouteLists returns all static route lists.
+// ListRouteLists returns all static route lists. Копии: правка результата
+// не меняет кэш хранилища мимо записи (F585).
 func (s *StaticRouteStore) ListRouteLists() ([]StaticRouteList, error) {
 	data, err := s.Get()
 	if err != nil {
 		return nil, fmt.Errorf("list route lists: %w", err)
 	}
-	return data.RouteLists, nil
+	out := make([]StaticRouteList, len(data.RouteLists))
+	for i, rl := range data.RouteLists {
+		rl.Subnets = slices.Clone(rl.Subnets)
+		out[i] = rl
+	}
+	return out, nil
 }
 
-// GetRouteList returns a static route list by ID.
+// GetRouteList returns a copy of the static route list by ID (F585).
 func (s *StaticRouteStore) GetRouteList(id string) (*StaticRouteList, error) {
 	data, err := s.Get()
 	if err != nil {
@@ -134,7 +141,9 @@ func (s *StaticRouteStore) GetRouteList(id string) (*StaticRouteList, error) {
 
 	for i := range data.RouteLists {
 		if data.RouteLists[i].ID == id {
-			return &data.RouteLists[i], nil
+			rl := data.RouteLists[i]
+			rl.Subnets = slices.Clone(rl.Subnets)
+			return &rl, nil
 		}
 	}
 

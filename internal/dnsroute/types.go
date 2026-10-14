@@ -1,6 +1,10 @@
 package dnsroute
 
-import "github.com/hoaxisr/awg-manager/internal/ipfamily"
+import (
+	"slices"
+
+	"github.com/hoaxisr/awg-manager/internal/ipfamily"
+)
 
 // MaxDomainsPerGroup is the maximum number of domains in a single NDMS object-group fqdn.
 const MaxDomainsPerGroup = 300
@@ -47,6 +51,36 @@ type DomainList struct {
 	// the next reconcile without a refetch. NDMS lists only. A pointer, so
 	// a partial update that does not send it keeps the stored value.
 	SkipIPv6 *bool `json:"skipIPv6,omitempty"`
+}
+
+// clone — копия без общих с кэшем хранилища срезов и указателей: правка
+// результата Get не должна менять кэш мимо записи (F667).
+func (l DomainList) clone() DomainList {
+	l.Domains = slices.Clone(l.Domains)
+	l.Excludes = slices.Clone(l.Excludes)
+	l.ExcludeSubnets = slices.Clone(l.ExcludeSubnets)
+	l.Subnets = slices.Clone(l.Subnets)
+	l.ManualDomains = slices.Clone(l.ManualDomains)
+	l.Subscriptions = slices.Clone(l.Subscriptions)
+	l.Routes = slices.Clone(l.Routes)
+	l.HRPolicyInterfaces = slices.Clone(l.HRPolicyInterfaces)
+	l.ExcludesText = clonePtr(l.ExcludesText)
+	l.ManualText = clonePtr(l.ManualText)
+	l.SkipIPv6 = clonePtr(l.SkipIPv6)
+	if l.LastDedupeReport != nil {
+		r := *l.LastDedupeReport
+		r.Items = slices.Clone(r.Items)
+		l.LastDedupeReport = &r
+	}
+	return l
+}
+
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // SkipsIPv6 reports whether the list keeps its IPv6 entries off the router.
