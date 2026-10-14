@@ -1,6 +1,10 @@
 package singbox
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/hoaxisr/awg-manager/internal/singbox/installer"
+)
 
 // ErrTunnelNotFound is returned when a tunnel tag does not exist in config.json.
 var ErrTunnelNotFound = errors.New("tunnel not found")
@@ -21,3 +25,8 @@ var ErrSingboxNotRunning = errors.New("sing-box is not running")
 // or update is already in flight — guards against manual and scheduled
 // binary installs interleaving.
 var ErrInstallInProgress = errors.New("sing-box install already in progress")
+
+// ErrNoSpace is returned by Install/Update when the pinned binary doesn't fit:
+// the disk-gate refused or the write hit ENOSPC. Details (required/free) are in
+// GetStatus.
+var ErrNoSpace = installer.ErrNoSpace

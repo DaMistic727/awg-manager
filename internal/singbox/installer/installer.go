@@ -10,12 +10,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
@@ -53,6 +55,7 @@ type Installer struct {
 	opkgListInstalled func(context.Context) (string, error)
 
 	freeDisk func(path string) (int64, bool) // overridable for tests; defaults to routerinfo.FreeBytes
+	isUBIFS  func(path string) bool          // overridable for tests; defaults to routerinfo.IsUBIFS
 
 	// SHA256 of the live binary, cached by (size, mtime). Generic SHA256 of a
 	// ~80MB binary costs ~13s CPU on softfloat MIPS, and GetStatus needs the
@@ -64,6 +67,10 @@ type Installer struct {
 	shaSize int64
 	shaMod  time.Time
 }
+
+// ErrNoSpace — бинарь не помещается на диск: отказ гейта или ENOSPC при
+// записи (сжатие ubifs оказалось хуже ubifsCompressFactor).
+var ErrNoSpace = errors.New("недостаточно места на диске")
 
 type Downloader interface {
 	DownloadFile(ctx context.Context, req DownloadFileRequest) (DownloadFileResult, error)
@@ -81,10 +88,17 @@ const binaryMaxBytes = 128 << 20
 // don't fill the filesystem completely.
 const diskReserveBytes = 16 << 20
 
+// ubifsCompressFactor — во сколько раз ubifs (внутренняя память Keenetic)
+// сжимает бинарь sing-box. Замер владельца — 2.52× (#964); 2 взято с запасом
+// на разброс между сборками. statfs на ubifs отдаёт свободное место без учёта
+// сжатия, поэтому гейт и потолок скачивания пересчитывают размер бинаря.
+const ubifsCompressFactor = 2
+
 // downloadByteLimit returns the max download size: free disk space minus a
-// reserve margin, or the static fallback when free space is unknown. Clamped
-// to be non-negative.
-func downloadByteLimit(freeBytes int64, freeOK bool, fallback, reserve int64) int64 {
+// reserve margin, times ratio (network bytes per on-disk byte: 1, or
+// ubifsCompressFactor on ubifs), or the static fallback when free space is
+// unknown. Clamped to be non-negative.
+func downloadByteLimit(freeBytes int64, freeOK bool, fallback, reserve, ratio int64) int64 {
 	if !freeOK {
 		return fallback
 	}
@@ -92,7 +106,7 @@ func downloadByteLimit(freeBytes int64, freeOK bool, fallback, reserve int64) in
 	if avail < 0 {
 		avail = 0
 	}
-	return avail
+	return avail * ratio
 }
 
 type DownloadFileRequest struct {
@@ -118,6 +132,7 @@ func New(binaryPath, arch string, spec BinarySpec, appLogger logging.AppLogger) 
 		spec:       spec,
 		appLog:     logging.NewScopedLogger(appLogger, logging.GroupSingbox, logging.SubSBProcess),
 		freeDisk:   routerinfo.FreeBytes,
+		isUBIFS:    routerinfo.IsUBIFS,
 	}
 }
 
@@ -135,9 +150,6 @@ func (i *Installer) RequiredVersion() string { return i.spec.Version }
 // RequiredSHA256 is the checksum this awg-manager build is pinned to.
 func (i *Installer) RequiredSHA256() string { return i.spec.SHA256 }
 
-// RequiredSize is the expected size of the pinned binary (bytes, uncompressed).
-// Zero means unknown — disk-gate is skipped.
-func (i *Installer) RequiredSize() int64 { return i.spec.Size }
 
 // CurrentSHA256 returns the checksum of the installed managed binary,
 // served from the (size, mtime) cache when the file is unchanged.
@@ -221,8 +233,8 @@ func (i *Installer) Download(ctx context.Context, onProgress httpdownload.Progre
 		return "", fmt.Errorf("downloader is not configured")
 	}
 
-	free, freeOK := routerinfo.FreeBytes(filepath.Dir(i.binaryPath))
-	maxBytes := downloadByteLimit(free, freeOK, binaryMaxBytes, diskReserveBytes)
+	free, freeOK := i.FreeBytes()
+	maxBytes := downloadByteLimit(free, freeOK, binaryMaxBytes, diskReserveBytes, i.compressRatio())
 
 	res, err := dl.DownloadFile(ctx, DownloadFileRequest{
 		URL:          i.spec.URL,
@@ -234,6 +246,9 @@ func (i *Installer) Download(ctx context.Context, onProgress httpdownload.Progre
 	})
 	if err != nil {
 		_ = os.Remove(tmp)
+		if errors.Is(err, syscall.ENOSPC) {
+			return "", fmt.Errorf("download %s: %w: %w", i.spec.URL, ErrNoSpace, err)
+		}
 		return "", fmt.Errorf("download %s: %w", i.spec.URL, err)
 	}
 	got, err := sha256File(tmp)
@@ -283,7 +298,31 @@ func (i *Installer) FreeBytes() (int64, bool) {
 	if i.freeDisk == nil {
 		return 0, false
 	}
-	return i.freeDisk(filepath.Dir(i.binaryPath))
+	return i.freeDisk(i.probeDir())
+}
+
+// DiscardStaleTmp удаляет <binary>.tmp, брошенный оборванным скачиванием
+// (демон убит, питание): он съедает место, и гейт отказывал бы навсегда —
+// сам Download чистит tmp только после гейта. Звать под installBusy.
+func (i *Installer) DiscardStaleTmp() {
+	_ = os.Remove(i.binaryPath + ".tmp")
+}
+
+// probeDir — ближайший существующий каталог на пути к бинарю. Uninstall
+// сносит каталог sing-box целиком, и statfs по нему вернул бы ENOENT —
+// гейт места молча отключился бы до следующей установки.
+func (i *Installer) probeDir() string {
+	dir := filepath.Dir(i.binaryPath)
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir
+		}
+		dir = parent
+	}
 }
 
 // SetFreeDiskFn overrides the free-disk probe (tests only).
@@ -301,8 +340,21 @@ func isExecutable(path string) bool {
 // tmp download file, logs, and slack. ~5 MiB.
 const safetyMargin = 5 << 20
 
-// SafetyMargin is the disk-gate slack added to spec.Size (bytes).
-const SafetyMargin = safetyMargin
+// compressRatio — сколько байт бинаря из сети ложится в один байт на диске
+// каталога установки.
+func (i *Installer) compressRatio() int64 {
+	if i.isUBIFS != nil && i.isUBIFS(i.probeDir()) {
+		return ubifsCompressFactor
+	}
+	return 1
+}
+
+// RequiredDiskBytes — сколько свободного места (как его видит statfs) нужно
+// гейту установки: бинарь на диске + safetyMargin + diskReserveBytes.
+// Ровно то число, с которым сравнивает EvaluateInstallState.
+func (i *Installer) RequiredDiskBytes() int64 {
+	return i.spec.Size/i.compressRatio() + safetyMargin + diskReserveBytes
+}
 
 // EvaluateInstallState reports the install state vs pinned spec, gated by
 // free disk. Pure file ops: isExecutable + cached binarySHA256 (no
@@ -322,22 +374,17 @@ func (i *Installer) EvaluateInstallState(currentVersion string) InstallState {
 		return InstallStateInstalled
 	}
 
-	required := i.spec.Size + safetyMargin
-	freeBytes, ok := int64(0), false
-	if i.freeDisk != nil {
-		freeBytes, ok = i.freeDisk(filepath.Dir(i.binaryPath))
-	}
-	gate := ok && i.spec.Size > 0
-	avail := freeBytes - diskReserveBytes
+	freeBytes, ok := i.FreeBytes()
+	noSpace := ok && i.spec.Size > 0 && freeBytes < i.RequiredDiskBytes()
 
 	if !installed {
-		if gate && avail < required {
+		if noSpace {
 			return InstallStateMissingNoSpace
 		}
 		return InstallStateMissing
 	}
 	// installed && !matches → upgrade
-	if gate && avail < required {
+	if noSpace {
 		return InstallStateOutdatedNoSpace
 	}
 	return InstallStateMissing

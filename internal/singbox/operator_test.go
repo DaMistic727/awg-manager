@@ -2104,7 +2104,7 @@ func TestRemoveDNSFinalFromBase_MalformedJSON_NoOp(t *testing.T) {
 	}
 }
 
-func TestOperator_Install_NoSpace_ReturnsNil(t *testing.T) {
+func TestOperator_Install_NoSpace_ReturnsErrNoSpace(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "sing-box") // не существует
 	op := NewOperator(OperatorDeps{Dir: dir, Binary: binary})
@@ -2114,15 +2114,15 @@ func TestOperator_Install_NoSpace_ReturnsNil(t *testing.T) {
 	inst.SetFreeDiskFn(func(string) (int64, bool) { return 50 << 20, true })
 	op.SetInstaller(inst)
 
-	if err := op.Install(context.Background()); err != nil {
-		t.Fatalf("Install returned error, expected nil: %v", err)
+	if err := op.Install(context.Background()); !errors.Is(err, ErrNoSpace) {
+		t.Fatalf("Install = %v, want ErrNoSpace", err)
 	}
 	if got := inst.EvaluateInstallState(""); got != installer.InstallStateMissingNoSpace {
 		t.Fatalf("EvaluateInstallState=%q, want %q", got, installer.InstallStateMissingNoSpace)
 	}
 }
 
-func TestOperator_Update_NoSpace_ReturnsNil(t *testing.T) {
+func TestOperator_Update_NoSpace_ReturnsErrNoSpace(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "sing-box")
 	if err := os.WriteFile(binary, []byte("old-content"), 0o755); err != nil {
@@ -2135,11 +2135,86 @@ func TestOperator_Update_NoSpace_ReturnsNil(t *testing.T) {
 	inst.SetFreeDiskFn(func(string) (int64, bool) { return 50 << 20, true })
 	op.SetInstaller(inst)
 
-	if err := op.Update(context.Background()); err != nil {
-		t.Fatalf("Update returned error, expected nil: %v", err)
+	if err := op.Update(context.Background()); !errors.Is(err, ErrNoSpace) {
+		t.Fatalf("Update = %v, want ErrNoSpace", err)
 	}
 	if got := inst.EvaluateInstallState(""); got != installer.InstallStateOutdatedNoSpace {
 		t.Fatalf("EvaluateInstallState=%q, want %q", got, installer.InstallStateOutdatedNoSpace)
+	}
+}
+
+// Install поверх устаревшего бинаря и Update без бинаря — тот же гейт места:
+// раньше каждый метод сверял только «своё» NoSpace-состояние и скачивал.
+func TestOperator_InstallUpdate_CrossStateNoSpace(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		present bool
+		call    func(*Operator) error
+	}{
+		{"Install поверх старого", true, func(o *Operator) error { return o.Install(context.Background()) }},
+		{"Update без бинаря", false, func(o *Operator) error { return o.Update(context.Background()) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			binary := filepath.Join(dir, "sing-box")
+			if c.present {
+				if err := os.WriteFile(binary, []byte("old-content"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			op := NewOperator(OperatorDeps{Dir: dir, Binary: binary})
+			inst := installer.New(binary, "test-arch", installer.BinarySpec{
+				Version: "1.2.3", URL: "u", SHA256: "different-sha", Size: 100 << 20,
+			}, nil)
+			inst.SetFreeDiskFn(func(string) (int64, bool) { return 50 << 20, true })
+			op.SetInstaller(inst)
+			if err := c.call(op); !errors.Is(err, ErrNoSpace) {
+				t.Fatalf("got %v, want ErrNoSpace", err)
+			}
+		})
+	}
+}
+
+// Брошенный оборванным скачиванием .tmp съедает место. Install/Update сносят
+// его до гейта, иначе отказ «нет места» был бы вечным.
+func TestOperator_InstallUpdate_DiscardStaleTmpBeforeGate(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		present bool
+		call    func(*Operator) error
+	}{
+		{"Install", false, func(o *Operator) error { return o.Install(context.Background()) }},
+		{"Update", true, func(o *Operator) error { return o.Update(context.Background()) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			binary := filepath.Join(dir, "sing-box")
+			if c.present {
+				if err := os.WriteFile(binary, []byte("old-content"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tmp := binary + ".tmp"
+			if err := os.WriteFile(tmp, []byte("half"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			op := NewOperator(OperatorDeps{Dir: dir, Binary: binary})
+			inst := installer.New(binary, "test-arch", installer.BinarySpec{
+				Version: "1.2.3", URL: "u", SHA256: "different-sha", Size: 100 << 20,
+			}, nil)
+			// Места хватает, только пока tmp удалён.
+			inst.SetFreeDiskFn(func(string) (int64, bool) {
+				if _, err := os.Stat(tmp); err == nil {
+					return 50 << 20, true
+				}
+				return 1 << 30, true
+			})
+			op.SetInstaller(inst)
+			// Downloader не подключён — дальше гейта упадёт с другой ошибкой.
+			if err := c.call(op); errors.Is(err, ErrNoSpace) {
+				t.Fatalf("got ErrNoSpace: брошенный tmp не снесён до гейта")
+			}
+		})
 	}
 }
 

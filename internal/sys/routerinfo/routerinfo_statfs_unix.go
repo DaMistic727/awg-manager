@@ -1,5 +1,3 @@
-//go:build !windows
-
 package routerinfo
 
 import "syscall"
@@ -17,4 +15,14 @@ func statfsUsage(path string) (used, total int64, ok bool) {
 		return 0, 0, false
 	}
 	return used, total, true
+}
+
+// ubifsMagic — UBIFS_SUPER_MAGIC из linux/magic.h.
+const ubifsMagic = 0x24051905
+
+// IsUBIFS сообщает, лежит ли path на ubifs (внутренняя NAND-память Keenetic).
+// Тип Statfs_t.Type зависит от арки, отсюда uint32.
+func IsUBIFS(path string) bool {
+	var st syscall.Statfs_t
+	return syscall.Statfs(path, &st) == nil && uint32(st.Type) == ubifsMagic
 }

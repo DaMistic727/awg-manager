@@ -69,7 +69,7 @@ func (o *Operator) GetStatus(ctx context.Context) Status {
 	}
 	if o.inst != nil {
 		s.InstallState = string(o.inst.EvaluateInstallState(s.CurrentVersion))
-		s.RequiredBytes = o.inst.RequiredSize() + installer.SafetyMargin
+		s.RequiredBytes = o.inst.RequiredDiskBytes()
 		if free, ok := o.inst.FreeBytes(); ok {
 			s.FreeBytes = free
 		}
@@ -331,11 +331,14 @@ func (o *Operator) Install(ctx context.Context) error {
 	if o.inst == nil {
 		return fmt.Errorf("installer not wired")
 	}
-	if o.inst.EvaluateInstallState("") == installer.InstallStateMissingNoSpace {
+	o.inst.DiscardStaleTmp()
+	if o.inst.EvaluateInstallState("").NoSpace() {
+		// Текст ошибки пустой: кадр только закрывает прогресс, а локализованную
+		// причину UI берёт из кода NO_SPACE в ответе.
 		if o.installProgress != nil {
-			o.installProgress("install", "error", 0, 0, "недостаточно места на диске")
+			o.installProgress("install", "error", 0, 0, "")
 		}
-		return nil // намеренно не error: фронт показывает баннер из GetStatus
+		return ErrNoSpace
 	}
 	report := func(phase string, downloaded, total int64, errMsg string) {
 		if o.installProgress != nil {
@@ -347,7 +350,7 @@ func (o *Operator) Install(ctx context.Context) error {
 	}
 	tmp, err := o.inst.Download(ctx, bytesProgress)
 	if err != nil {
-		report("error", 0, 0, err.Error())
+		report("error", 0, 0, progressErrText(err))
 		return fmt.Errorf("download sing-box: %w", err)
 	}
 	report("activate", 0, 0, "")
@@ -358,6 +361,16 @@ func (o *Operator) Install(ctx context.Context) error {
 	o.recordPinnedVersion()
 	report("done", 0, 0, "")
 	return nil
+}
+
+// progressErrText — текст ошибки для кадра прогресса. Для ErrNoSpace пустой:
+// причину UI локализует по коду NO_SPACE из ответа, русский текст бэкенда
+// в кадре обошёл бы перевод.
+func progressErrText(err error) string {
+	if errors.Is(err, ErrNoSpace) {
+		return ""
+	}
+	return err.Error()
 }
 
 // Uninstall снимает установленный движок: останавливает процесс и удаляет
@@ -416,6 +429,7 @@ func (o *Operator) Update(ctx context.Context) error {
 	if o.inst == nil {
 		return fmt.Errorf("installer not wired")
 	}
+	o.inst.DiscardStaleTmp()
 	// MatchesPinnedBytes сам требует версию pinned, когда SHA не совпал
 	// (UPX-копия); при совпавшем SHA версия не важна — байты уже наши.
 	cur, _ := o.detectVersionAndFeaturesCached(ctx)
@@ -424,11 +438,11 @@ func (o *Operator) Update(ctx context.Context) error {
 	}
 	// "" — UPX-копия pinned-версии уже отсечена проверкой выше,
 	// версия на решение гейта больше не влияет.
-	if o.inst.EvaluateInstallState("") == installer.InstallStateOutdatedNoSpace {
+	if o.inst.EvaluateInstallState("").NoSpace() {
 		if o.installProgress != nil {
-			o.installProgress("update", "error", 0, 0, "недостаточно места для обновления")
+			o.installProgress("update", "error", 0, 0, "")
 		}
-		return nil
+		return ErrNoSpace
 	}
 	report := func(phase string, downloaded, total int64, errMsg string) {
 		if o.installProgress != nil {
@@ -440,7 +454,7 @@ func (o *Operator) Update(ctx context.Context) error {
 	}
 	tmp, err := o.inst.Download(ctx, bytesProgress)
 	if err != nil {
-		report("error", 0, 0, err.Error())
+		report("error", 0, 0, progressErrText(err))
 		return fmt.Errorf("download sing-box: %w", err)
 	}
 	wasRunning, _ := o.proc.IsRunning()
