@@ -21,8 +21,10 @@
 		outboundOptions: OutboundGroup[];
 		onClose: () => void;
 		onSave: (server: SingboxRouterDNSServer) => Promise<void> | void;
+		/** Сервер ведёт движок, адрес отправителя бэкенд отвергнет — поле не показываем. */
+		bindAddressLocked?: boolean;
 	}
-	let { server, servers, outboundOptions, onClose, onSave }: Props = $props();
+	let { server, servers, outboundOptions, onClose, onSave, bindAddressLocked = false }: Props = $props();
 
 	const TYPE_OPTIONS = $derived<DropdownOption<SingboxRouterDNSType>[]>([
 		{ value: 'udp', label: m.routing_singbox_dns_type_udp() },
@@ -79,6 +81,8 @@
 			: (normalizeDnsServerDetour(server?.detour) ?? ''),
 	);
 	// svelte-ignore state_referenced_locally
+	let bindAddress = $state(server?.inet4_bind_address ?? '');
+	// svelte-ignore state_referenced_locally
 	let strategy = $state<SingboxRouterDNSStrategy>(server?.domain_strategy ?? '');
 	// svelte-ignore state_referenced_locally
 	let resolverEnabled = $state(server?.domain_resolver != null);
@@ -128,6 +132,7 @@
 	let initialServerPort = $state<number | ''>('');
 	let initialPath = $state('');
 	let initialDetour = $state('');
+	let initialBindAddress = $state('');
 	let initialStrategy = $state<SingboxRouterDNSStrategy>('');
 	let initialResolverEnabled = $state(false);
 	let initialResolverServer = $state('');
@@ -147,6 +152,7 @@
 				server.tag === DNS_DIRECT_SERVER_TAG
 					? ''
 					: (normalizeDnsServerDetour(server.detour) ?? '');
+			initialBindAddress = server.inet4_bind_address ?? '';
 			initialStrategy = server.domain_strategy ?? '';
 			initialResolverEnabled = server.domain_resolver != null;
 			initialResolverServer = server.domain_resolver?.server ?? '';
@@ -167,6 +173,7 @@
 			initialServerPort = '';
 			initialPath = '';
 			initialDetour = '';
+			initialBindAddress = '';
 			initialStrategy = '';
 			initialResolverEnabled = false;
 			initialResolverServer = '';
@@ -186,6 +193,7 @@
 		serverPort = '';
 		path = '';
 		detour = '';
+		bindAddress = '';
 		strategy = '';
 		resolverEnabled = false;
 		resolverServer = '';
@@ -206,6 +214,7 @@
 			serverPort !== initialServerPort ||
 			path !== initialPath ||
 			(detour !== initialDetour && !isManagedDnsDirect) ||
+			bindAddress !== initialBindAddress ||
 			strategy !== initialStrategy ||
 			resolverEnabled !== initialResolverEnabled ||
 			resolverServer !== initialResolverServer ||
@@ -311,7 +320,11 @@
 			const payload =
 				type === 'local'
 					? built
-					: sanitizeDnsServerForApi({ ...built, detour: detour || undefined });
+					: sanitizeDnsServerForApi({
+							...built,
+							detour: detour || undefined,
+							inet4_bind_address: bindAddress,
+						});
 
 			await onSave(payload);
 		} catch (e) {
@@ -385,6 +398,13 @@
 							{m.routing_singbox_dns_detour_hint()} <code>detour</code> {m.routing_singbox_dns_detour_not_written()}
 						</div>
 					</label>
+					{#if !hasOutboundDetour && !bindAddressLocked}
+						<label class="field">
+							<div class="lbl">{m.routing_singbox_dns_bind_address_label()}</div>
+							<input bind:value={bindAddress} placeholder="10.0.20.1" />
+							<div class="hint">{m.routing_singbox_dns_bind_address_hint()}</div>
+						</label>
+					{/if}
 				{/if}
 
 				<label class="field">
