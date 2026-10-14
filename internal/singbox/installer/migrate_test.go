@@ -82,9 +82,7 @@ func TestMigrate_AbortsBeforeOpkgRemoveOnDownloadFailure(t *testing.T) {
 func TestMigrate_IdempotentWhenManagedAlreadyInstalled(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "sing-box")
-	// Place a fake binary that returns the expected version output. We use
-	// /bin/echo with a script trick: write a tiny shell script as the binary
-	// that prints the right version line so CurrentVersion returns non-empty.
+	// Управляемый бинарь на месте — миграция не нужна.
 	scriptBody := "#!/bin/sh\necho 'sing-box version 1.13.11'\n"
 	if err := os.WriteFile(target, []byte(scriptBody), 0755); err != nil {
 		t.Fatal(err)
@@ -100,6 +98,27 @@ func TestMigrate_IdempotentWhenManagedAlreadyInstalled(t *testing.T) {
 	}
 	if opkgCalled || lc.stopCalled || lc.startCalled {
 		t.Errorf("Migrate triggered side effects when managed binary already in place: opkg=%v stop=%v start=%v", opkgCalled, lc.stopCalled, lc.startCalled)
+	}
+}
+
+// F134: бинарь на месте, но `version` молчит (UPX не распаковался при
+// нехватке RAM) — это не «бинаря нет», миграция поверх него не идёт.
+func TestMigrate_SkipsWhenBinaryPresentButVersionSilent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sing-box")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	inst := New(target, "test", BinarySpec{Version: "1.13.11", URL: "http://127.0.0.1:1/never", SHA256: "0000"}, nil)
+	opkgCalled := false
+	inst.opkgRemove = func(ctx context.Context) error { opkgCalled = true; return nil }
+
+	lc := &fakeLifecycle{}
+	if err := inst.Migrate(context.Background(), lc); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if opkgCalled || lc.stopCalled {
+		t.Errorf("миграция поверх живого бинаря: opkg=%v stop=%v", opkgCalled, lc.stopCalled)
 	}
 }
 

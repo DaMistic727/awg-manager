@@ -318,7 +318,7 @@ func (a *app) setupDeviceProxy() {
 		// awg-manager on the legacy install — retry happens on next boot.
 		go func() {
 			ctx := context.Background()
-			if a.singboxInstaller.CurrentVersion(ctx) != "" {
+			if a.singboxInstaller.HasManagedBinary() {
 				return // managed binary already in place
 			}
 			if !a.singboxInstaller.IsLegacyOpkgInstalled(ctx) {

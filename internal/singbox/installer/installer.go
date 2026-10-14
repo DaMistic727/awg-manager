@@ -13,9 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -272,30 +270,11 @@ func (i *Installer) Activate(tmpPath string) error {
 	return nil
 }
 
-// CurrentVersion runs `<binaryPath> version` and returns the parsed
-// version string, or "" if the binary is missing/unexecutable.
-func (i *Installer) CurrentVersion(ctx context.Context) string {
-	if _, err := os.Stat(i.binaryPath); err != nil {
-		return ""
-	}
-	// Entware/UPX builds on Keenetic can take several seconds to emit
-	// the version banner — keep the headroom so first-call probes
-	// still succeed on slow targets.
-	cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(cctx, i.binaryPath, "version").Output()
-	if err != nil {
-		return ""
-	}
-	versionRe := regexp.MustCompile(`(?i)\bsing-?box\b\s+version\b\s+([^\s]+)`)
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if m := versionRe.FindStringSubmatch(line); len(m) == 2 {
-			return strings.TrimSpace(m[1])
-		}
-	}
-	return ""
-}
+// HasManagedBinary — управляемый бинарь лежит на месте. Вопрос «мигрировать
+// ли» решается по файлу, а не по ответу `<бинарь> version`: пустой ответ (UPX
+// не распаковался при нехватке RAM, таймаут) — не отсутствие бинаря, и
+// миграция поверх живого бинаря снесла бы рабочую установку (F134).
+func (i *Installer) HasManagedBinary() bool { return isExecutable(i.binaryPath) }
 
 // FreeBytes wraps the freeDisk probe so callers (Operator.GetStatus) don't
 // recompute install-dir. Returns (0, false) when probe unavailable.

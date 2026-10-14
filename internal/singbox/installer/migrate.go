@@ -81,10 +81,10 @@ var defaultOpkgRemove = func(ctx context.Context) error {
 // even if opkg lock contention prevented removing the legacy package
 // (a follow-up boot can clean it up).
 //
-// Idempotent: when CurrentVersion returns non-empty (managed binary
-// already in place) Migrate returns nil without side effects.
+// Idempotent: when the managed binary is already in place Migrate returns
+// nil without side effects.
 func (i *Installer) Migrate(ctx context.Context, lc Lifecycle) error {
-	if i.CurrentVersion(ctx) != "" {
+	if i.HasManagedBinary() {
 		i.appLog.Info("migrate", "", "managed binary already present, skipping")
 		return nil
 	}
