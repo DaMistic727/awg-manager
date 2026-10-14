@@ -51,6 +51,11 @@ var readOnlyTools = map[string]bool{
 // also walk away with VPN credentials is not that. So these tools keep
 // their read-only annotation (they ARE reads) and are still refused for
 // a read-only key.
+//
+// Опасный ФЛАГ у читающего инструмента (get_logs raw=true — немаскированные
+// адреса) здесь не выразить: middleware аргументы не разбирает. Такой флаг
+// отказывается read-only ключу в самом обработчике — образец в
+// tools_system.go (get_logs, KeyFromContext + key.ReadOnly) (MC12).
 var credentialTools = map[string]bool{
 	"export_tunnel_config":   true,
 	"get_server_peer_config": true,

@@ -45,6 +45,11 @@ func RedactURLs(s string) string {
 	return urlInTextRe.ReplaceAllStringFunc(s, func(m string) string {
 		core := strings.TrimRight(m, trailingPunct)
 		tail := m[len(core):]
+		// «]» закрывает литерал IPv6 (`http://[::1]`), а не предложение:
+		// срезанная, она роняла разбор и хост терялся (MC10).
+		if strings.Count(core, "[") > strings.Count(core, "]") && strings.HasPrefix(tail, "]") {
+			core, tail = core+"]", tail[1:]
+		}
 		scheme, _, _ := strings.Cut(core, "://")
 		u, err := url.Parse(core)
 		if err != nil || !keptHostRe.MatchString(u.Host) {

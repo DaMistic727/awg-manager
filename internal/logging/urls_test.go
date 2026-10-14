@@ -37,6 +37,11 @@ func TestRedactURLs(t *testing.T) {
 			`Get "https://sub.example.com": EOF`,
 			`Get "https://sub.example.com": EOF`,
 		},
+		// MC10: «]» литерала без порта — не пунктуация предложения.
+		"ipv6 host without port": {
+			`Get "http://[::1]": refused; see http://[2001:db8::1]).`,
+			`Get "http://[::1]": refused; see http://[2001:db8::1]).`,
+		},
 		"ipv6 host": {
 			`Get "http://[2001:db8::1]:8080/list?k=v": refused`,
 			`Get "http://[2001:db8::1]:8080/…": refused`,

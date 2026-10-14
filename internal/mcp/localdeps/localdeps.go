@@ -755,6 +755,16 @@ func (l *Local) ReplaceTunnelConfig(ctx context.Context, id, cfg, newName string
 	wasRunning := l.c.Tunnels.GetState(ctx, id).State == tunnel.StateRunning
 	if wasRunning {
 		if err := l.c.Tunnels.Stop(ctx, id); err != nil {
+			// Замок занят — конфиг и туннель не тронуты, повтор пройдёт.
+			// Иначе — как HTTP-ручка (F649): отказ действия остановки
+			// оркестратор проглатывает и всё равно пишет Enabled=false, и
+			// работавший туннель лежал бы и после ребута (F659). Restart, а не
+			// Start: кэш оркестратора может считать туннель работающим.
+			if !errors.Is(err, tunnel.ErrOperationInProgress) {
+				if rErr := l.c.Tunnels.Restart(context.WithoutCancel(ctx), id); rErr != nil {
+					l.tunnelLog.Warn("replace-config", id, "Restart after failed stop failed (MCP): "+rErr.Error())
+				}
+			}
 			return nil, fmt.Errorf("failed to stop tunnel before config replace: %w", err)
 		}
 	}

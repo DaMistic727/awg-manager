@@ -874,6 +874,10 @@ func (f *lifecycleTunnels) Start(context.Context, string) error {
 	f.calls = append(f.calls, "start")
 	return f.startErr
 }
+func (f *lifecycleTunnels) Restart(context.Context, string) error {
+	f.calls = append(f.calls, "restart")
+	return nil
+}
 func (f *lifecycleTunnels) ReplaceConfig(_ context.Context, _, cfg, _ string) error {
 	f.calls = append(f.calls, "replace")
 	f.importedCfg = cfg
@@ -969,13 +973,27 @@ func TestLocal_ReplaceTunnelConfigStopsAndStarts(t *testing.T) {
 		}
 	})
 
-	t.Run("a failed stop leaves the config alone", func(t *testing.T) {
+	t.Run("a busy lock leaves the tunnel and config alone", func(t *testing.T) {
 		l, ft, _ := newLifecycle(t, tunnel.StateRunning)
-		ft.stopErr = fmt.Errorf("operation in progress")
+		ft.stopErr = tunnel.ErrOperationInProgress
 		if _, err := l.ReplaceTunnelConfig(ctx, "tn-1", "cfg", ""); err == nil {
 			t.Fatal("a failed stop must abort the replace")
 		}
 		if want := []string{"stop"}; !reflect.DeepEqual(ft.calls, want) {
+			t.Fatalf("calls = %v, want %v", ft.calls, want)
+		}
+	})
+
+	// F659: отказ действия остановки оркестратор всё равно записывает как
+	// Enabled=false — без подъёма туннель лежал бы и после ребута. Конфиг
+	// прежний.
+	t.Run("a failed stop restarts the tunnel and keeps the config", func(t *testing.T) {
+		l, ft, _ := newLifecycle(t, tunnel.StateRunning)
+		ft.stopErr = fmt.Errorf("ndms: boom")
+		if _, err := l.ReplaceTunnelConfig(ctx, "tn-1", "cfg", ""); err == nil {
+			t.Fatal("a failed stop must abort the replace")
+		}
+		if want := []string{"stop", "restart"}; !reflect.DeepEqual(ft.calls, want) {
 			t.Fatalf("calls = %v, want %v", ft.calls, want)
 		}
 	})
