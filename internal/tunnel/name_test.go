@@ -45,3 +45,16 @@ func TestTruncateName_RuneBoundary(t *testing.T) {
 		t.Fatalf("короткое имя изменено")
 	}
 }
+
+// F531: пустое имя или имя из одних пробелов — отказ на входе: описание записи
+// OpkgTun пустым быть не должно, старт и остановка трактовали его по-разному.
+func TestValidateName_Empty(t *testing.T) {
+	for _, in := range []string{"", " ", "\t \n"} {
+		if err := ValidateName(in); !errors.Is(err, ErrNameEmpty) {
+			t.Fatalf("ValidateName(%q) = %v, want ErrNameEmpty", in, err)
+		}
+	}
+	if err := ValidateName(" Мой туннель "); err != nil {
+		t.Fatalf("имя с краевыми пробелами, но не пустое: %v", err)
+	}
+}

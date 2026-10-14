@@ -29,9 +29,10 @@ const u16RangeField = () =>
 // Edit tunnel schema - flat structure matching the edit form
 export const editTunnelSchema = z.object({
     // Имя — описание записи интерфейса в NDMS, а не имя интерфейса ядра:
-    // сервер (tunnel.ValidateName) ограничивает только длину в байтах UTF-8.
+    // сервер (tunnel.ValidateName) требует непустое имя (не из одних пробелов)
+    // и ограничивает длину в байтах UTF-8.
     name: z.string()
-        .min(1, { error: () => m.validation_name_required() })
+        .refine((v) => v.trim() !== '', { error: () => m.validation_name_required() })
         .refine((v) => tunnelNameBytes(v) <= TUNNEL_NAME_MAX_BYTES, {
             error: () => m.validation_tunnel_name_too_long({ max: TUNNEL_NAME_MAX_BYTES }),
         }),

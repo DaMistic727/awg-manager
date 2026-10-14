@@ -207,7 +207,8 @@ describe('editTunnelSchema name', () => {
         expect(nameErr('a'.repeat(257))).toBeDefined();
     });
 
-    it('пустое имя отвергается', () => {
+    it('пустое имя и имя из пробелов отвергаются (F531)', () => {
         expect(nameErr('')).toBeDefined();
+        expect(nameErr('   ')).toBeDefined();
     });
 });

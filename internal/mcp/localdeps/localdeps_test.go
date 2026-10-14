@@ -948,6 +948,27 @@ func TestLocal_ReplaceTunnelConfigStopsAndStarts(t *testing.T) {
 		}
 	})
 
+	t.Run("a failed replace starts the tunnel back (F520 class)", func(t *testing.T) {
+		l, ft, _ := newLifecycle(t, tunnel.StateRunning)
+		ft.replaceErr = fmt.Errorf("parse conf: bad")
+		if _, err := l.ReplaceTunnelConfig(ctx, "tn-1", "cfg", ""); err == nil {
+			t.Fatal("ждали ошибку замены")
+		}
+		if want := []string{"stop", "replace", "start"}; !reflect.DeepEqual(ft.calls, want) {
+			t.Fatalf("calls = %v, want %v", ft.calls, want)
+		}
+	})
+
+	t.Run("a whitespace-only new name is refused before stop (F531)", func(t *testing.T) {
+		l, ft, _ := newLifecycle(t, tunnel.StateRunning)
+		if _, err := l.ReplaceTunnelConfig(ctx, "tn-1", "cfg", "   "); !errors.Is(err, tunnel.ErrNameEmpty) {
+			t.Fatalf("err = %v, want ErrNameEmpty", err)
+		}
+		if len(ft.calls) != 0 {
+			t.Fatalf("туннель тронут: %v", ft.calls)
+		}
+	})
+
 	t.Run("a failed stop leaves the config alone", func(t *testing.T) {
 		l, ft, _ := newLifecycle(t, tunnel.StateRunning)
 		ft.stopErr = fmt.Errorf("operation in progress")

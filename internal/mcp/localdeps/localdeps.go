@@ -745,6 +745,13 @@ func (l *Local) ReplaceTunnelConfig(ctx context.Context, id, cfg, newName string
 	if err := config.RejectAmneziaPremium(cfg); err != nil {
 		return nil, err
 	}
+	// Имя — тот же предел, что проверит ReplaceConfig, но до Stop (как HTTP-
+	// ручка) и, как там, только при смене имени.
+	if st := l.stored(id); st != nil && newName != "" && newName != st.Name {
+		if err := tunnel.ValidateName(newName); err != nil {
+			return nil, err
+		}
+	}
 	wasRunning := l.c.Tunnels.GetState(ctx, id).State == tunnel.StateRunning
 	if wasRunning {
 		if err := l.c.Tunnels.Stop(ctx, id); err != nil {
@@ -753,6 +760,13 @@ func (l *Local) ReplaceTunnelConfig(ctx context.Context, id, cfg, newName string
 	}
 	if err := l.c.Tunnels.ReplaceConfig(ctx, id, cfg, newName); err != nil {
 		l.tunnelLog.Warn("replace-config", id, "Failed to replace tunnel config (MCP): "+err.Error())
+		// Туннель остановлен выше, конфиг при отказе прежний: поднимаем то,
+		// что работало (класс F520), не слушая отмену запроса агента.
+		if wasRunning {
+			if sErr := l.c.Tunnels.Start(context.WithoutCancel(ctx), id); sErr != nil {
+				l.tunnelLog.Warn("start", id, "Failed to restart tunnel after failed config replace (MCP): "+sErr.Error())
+			}
+		}
 		return nil, err
 	}
 	l.tunnelLog.Info("replace-config", id, "Tunnel config replaced (MCP)")
