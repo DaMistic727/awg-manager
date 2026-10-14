@@ -887,6 +887,12 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Повторный старт откатывает НАШ Stop ниже, а не исполняет новую команду
+	// пользователя, поэтому отмену запроса он не слушает: оркестратор на
+	// отменённом контексте ничего не делает (#426), а Stop уже снял Enabled —
+	// закрытая вкладка оставила бы туннель выключенным и после ребута (F520).
+	restartCtx := context.WithoutCancel(r.Context())
+
 	// Check if running — need to stop before replacing config
 	stateInfo := h.svc.GetState(r.Context(), id)
 	wasRunning := stateInfo.State == tunnel.StateRunning
@@ -902,16 +908,22 @@ func (h *TunnelsHandler) ReplaceConf(w http.ResponseWriter, r *http.Request) {
 				response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "OPERATION_IN_PROGRESS")
 				return
 			}
+			// Отказ одного из действий остановки оркестратор проглатывает и
+			// всё равно пишет Enabled=false (ActionPersistStopped последний):
+			// без подъёма работавший туннель лежал бы и после ребута (F649).
+			// Второй путь сюда — запрос отменён до первого действия: туннель
+			// цел, и Restart лишь коротко его передёрнет — цена принята.
+			// Именно Restart, а не Start: если упало само действие остановки,
+			// кэш оркестратора по-прежнему считает туннель работающим, и
+			// Start был бы пустым; Restart в обоих состояниях поднимает
+			// туннель и пишет Enabled=true. Конфиг не тронут — прежний.
+			if rErr := h.svc.Restart(restartCtx, id); rErr != nil {
+				h.log.Warn("replace", stored.Name, "Restart after failed stop failed: "+rErr.Error())
+			}
 			response.InternalError(w, "failed to stop tunnel before config replace: "+err.Error())
 			return
 		}
 	}
-
-	// Повторный старт откатывает НАШ Stop выше, а не исполняет новую команду
-	// пользователя, поэтому отмену запроса он не слушает: оркестратор на
-	// отменённом контексте ничего не делает (#426), а Stop уже снял Enabled —
-	// закрытая вкладка оставила бы туннель выключенным и после ребута (F520).
-	restartCtx := context.WithoutCancel(r.Context())
 
 	// Replace config
 	var warnings []string

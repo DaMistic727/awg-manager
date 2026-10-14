@@ -292,11 +292,13 @@ type stubTunnelSvc struct {
 	stateFn  func(tunnelID string) tunnel.StateInfo
 	getFn    func(ctx context.Context, id string) (*service.TunnelWithStatus, error)
 
-	replaceCalls int
-	replaceErr   error
-	replaceNames []string
-	startCalls   int
-	startCtxErrs []error
+	replaceCalls   int
+	replaceErr     error
+	replaceNames   []string
+	startCalls     int
+	startCtxErrs   []error
+	restartCalls   int
+	restartCtxErrs []error
 
 	setEnabledCalls      []toggleCall
 	setDefaultRouteCalls []toggleCall
@@ -334,7 +336,11 @@ func (s *stubTunnelSvc) Stop(ctx context.Context, tunnelID string) error {
 	}
 	return nil
 }
-func (s *stubTunnelSvc) Restart(context.Context, string) error                  { return nil }
+func (s *stubTunnelSvc) Restart(ctx context.Context, _ string) error {
+	s.restartCalls++
+	s.restartCtxErrs = append(s.restartCtxErrs, ctx.Err())
+	return nil
+}
 func (s *stubTunnelSvc) CheckAddressConflicts(context.Context, string) []string { return nil }
 func (s *stubTunnelSvc) GetState(_ context.Context, tunnelID string) tunnel.StateInfo {
 	if s.stateFn != nil {
@@ -590,6 +596,11 @@ func TestTunnelReplaceConf_OperationInProgressIs409(t *testing.T) {
 	// работающего туннеля молча заменяется под чужой операцией.
 	if stub.replaceCalls != 0 {
 		t.Fatalf("конфиг заменён вопреки занятому замку: вызовов ReplaceConfig = %d", stub.replaceCalls)
+	}
+	// Подъём под чужой операцией (например, пользовательским Stop) отменил
+	// бы её — на 409 ни старта, ни рестарта (F649).
+	if stub.startCalls != 0 || stub.restartCalls != 0 {
+		t.Fatalf("на 409 туннель поднят: start=%d restart=%d", stub.startCalls, stub.restartCalls)
 	}
 }
 
@@ -1200,5 +1211,36 @@ func TestTunnelReplaceConf_RestartIgnoresClientCancel(t *testing.T) {
 				t.Fatalf("Start получил контекст с ошибкой %v, ждали живой", stub.startCtxErrs)
 			}
 		})
+	}
+}
+
+// F649: Stop перед заменой упал после того, как оркестратор записал
+// Enabled=false (сбой одного из действий остановки) — работавший туннель
+// поднимается обратно, иначе он лежал бы и после ребута.
+func TestTunnelReplaceConf_FailedStopRestartsTunnel(t *testing.T) {
+	stub := &stubTunnelSvc{
+		stateFn: func(string) tunnel.StateInfo { return tunnel.StateInfo{State: tunnel.StateRunning} },
+		stopFn:  func(context.Context, string) error { return errors.New("remove static routes: rci down") },
+	}
+	h, store := newTunnelsUpdateHarness(t, stub)
+	if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Клиент уже ушёл: подъём обязан пройти и на отменённом запросе.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	body, _ := json.Marshal(map[string]string{"content": "[Interface]\n"})
+	rec := httptest.NewRecorder()
+	h.ReplaceConf(rec, httptest.NewRequest(http.MethodPost, "/tunnels/replace?id=awg11", bytes.NewReader(body)).WithContext(ctx))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("код = %d, тело: %s", rec.Code, rec.Body.String())
+	}
+	if stub.replaceCalls != 0 {
+		t.Fatal("замена пошла после отказа Stop")
+	}
+	if stub.restartCalls != 1 || stub.restartCtxErrs[0] != nil || stub.startCalls != 0 {
+		t.Fatalf("ждали один Restart на живом контексте: restart=%d ctx=%v start=%d",
+			stub.restartCalls, stub.restartCtxErrs, stub.startCalls)
 	}
 }
