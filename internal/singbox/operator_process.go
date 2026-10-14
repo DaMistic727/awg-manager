@@ -432,7 +432,36 @@ func (o *Operator) IsRunning() (bool, int) { return o.proc.IsRunning() }
 // this passthrough exists for legacy fallback paths and the
 // SingboxController contract (router uses it when Orch is unwired in
 // tests, and the scheduler / RefreshRuleSet call it directly).
-func (o *Operator) Reload() error { return o.proc.Reload() }
+func (o *Operator) Reload() error {
+	_, before := o.proc.IsRunning()
+	if err := o.proc.Reload(); err != nil {
+		return err
+	}
+	_, after := o.proc.IsRunning()
+	o.confirmReadyByClash(after != before && after != 0)
+	return nil
+}
+
+// confirmReadyByClash — признак готовности, не зависящий от уровня журнала
+// (F656, решение владельца 14.10): строку «sing-box started» печатает только
+// INFO, и при warn/error старт мимо startAndWait (Reload, Start) не снимал
+// прежний СБОЙ, а backoff не узнавал о новом процессе. Здесь готовность — ответ
+// Clash API: снимается lastError, на свежем процессе (spawned) backoff узнаёт
+// время старта. Строка ожидается — работает handleStderrLine, сюда не ходим.
+func (o *Operator) confirmReadyByClash(spawned bool) {
+	if o.proc.StartedLineExpected == nil || o.proc.StartedLineExpected() || !o.configDeclaresClashAPI() {
+		return
+	}
+	go func() {
+		if err := o.waitClashReady(context.Background(), maxSingboxBootWait); err != nil {
+			return
+		}
+		o.setLastError("")
+		if spawned {
+			o.restartBackoff.NoteProcessStart(time.Now())
+		}
+	}()
+}
 
 // Start cold-starts sing-box after validating the config.d. Public
 // version of the internal startAndWait — used by router.ServiceImpl.enable
@@ -459,6 +488,8 @@ func (o *Operator) startSpawned() (bool, error) {
 		// См. startAndWait: время старта нужно backoff'у для распознавания
 		// «здорового» аптайма перед следующим падением.
 		o.restartBackoff.NoteProcessStart(time.Now())
+		// Время старта уже отмечено — по Clash снимается только lastError.
+		o.confirmReadyByClash(false)
 	}
 	return spawned, nil
 }
