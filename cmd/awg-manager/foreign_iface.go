@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/hoaxisr/awg-manager/internal/api"
+	"github.com/hoaxisr/awg-manager/internal/ndms"
 	ndmsquery "github.com/hoaxisr/awg-manager/internal/ndms/query"
 	"github.com/hoaxisr/awg-manager/internal/opkgtun"
 	"github.com/hoaxisr/awg-manager/internal/storage"
@@ -183,11 +184,34 @@ func sysCarrier(sysNet, name string) bool {
 // ListAll: `interface-name` в списке — эхо id или метка (стенд 5.02.A.11:
 // Bridge0 → "Home"), настоящее имя (br0) даёт только резолвер, а ListAll
 // разрешает его пакетом и кэширует.
+//
+// Запись, чьего имени резолвер не узнал (сбой RCI), ListAll пропускает — а
+// это может быть TUN роутера (OpenVPN и т.п.), который тогда прошёл бы
+// отметку. Поэтому неполный набор — ошибка, а не «неизвестен» (F514). Сам
+// резолвер переспрашивает только вслед за свежим списком, которого на тихом
+// роутере может не быть долго, — поэтому перед отказом один список берётся
+// принудительно.
 func ndmsSystemNames(store *ndmsquery.InterfaceStore) func(context.Context) (map[string]bool, error) {
 	return func(ctx context.Context) (map[string]bool, error) {
-		all, err := store.ListAll(ctx)
-		if err != nil {
-			return nil, err
+		var all []ndms.AllInterface
+		for attempt := 0; ; attempt++ {
+			var err error
+			if all, err = store.ListAll(ctx); err != nil {
+				return nil, err
+			}
+			unnamed, err := store.UnnamedIDs(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if len(unnamed) == 0 {
+				break
+			}
+			if attempt > 0 {
+				return nil, fmt.Errorf("имя ядра не известно для %s — повторите позже", strings.Join(unnamed, ", "))
+			}
+			if err := store.Refresh(ctx); err != nil {
+				return nil, err
+			}
 		}
 		out := make(map[string]bool, len(all))
 		for _, i := range all {

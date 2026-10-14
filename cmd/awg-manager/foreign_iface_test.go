@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hoaxisr/awg-manager/internal/api"
@@ -255,5 +256,52 @@ func TestForeignMark_ExistingNonTUNRejected(t *testing.T) {
 	}
 	if got := f.settings.GetForeignInterfaces(); !slices.Equal(got, []string{"zt0"}) {
 		t.Fatalf("отметки = %v, ждали zt0", got)
+	}
+}
+
+// F514: резолвер не ответил — имя ядра записи NDMS неизвестно, и ListAll её
+// пропускает. Это может быть TUN роутера (OpenVPN0 → tun0), поэтому отметка
+// отказывает ошибкой, а не пропускает имя как «не известное NDMS».
+func TestNDMSSystemNames_UnresolvedFailsClosed(t *testing.T) {
+	fg := ndmsquery.NewFakeGetter()
+	fg.SetJSON("/show/interface/", `{
+  "OpenVPN0": {"id":"OpenVPN0","interface-name":"OpenVPN0","type":"OpenVPN","state":"up","link":"up"}
+}`)
+	fg.SetPostSystemNameError("OpenVPN0", errors.New("rci: timeout"))
+	f := newForeignEnv(t, nil, nil)
+	f.ndmsNames = ndmsSystemNames(ndmsquery.NewInterfaceStore(fg, ndmsquery.NopLogger()))
+
+	_, err := f.Mark(context.Background(), "tun0")
+	if err == nil || errors.Is(err, api.ErrForeignIfaceRejected) || !strings.Contains(err.Error(), "OpenVPN0") {
+		t.Fatalf("Mark(tun0) = %v, ждали ошибку с неразрешённым OpenVPN0", err)
+	}
+	if got := f.settings.GetForeignInterfaces(); len(got) != 0 {
+		t.Fatalf("отметка записана при неизвестном имени: %v", got)
+	}
+	if _, err := f.Candidates(context.Background()); err == nil {
+		t.Fatal("Candidates при неизвестном имени должен отказать")
+	}
+}
+
+// Резолвер ожил — отказ не залипает: перед отказом список берётся заново, и
+// его резолвер узнаёт имя. Без этого отказ держался бы до чужого обновления
+// списка, а на тихом роутере это долго.
+func TestNDMSSystemNames_RecoversAfterResolverFailure(t *testing.T) {
+	fg := ndmsquery.NewFakeGetter()
+	fg.SetJSON("/show/interface/", `{
+  "OpenVPN0": {"id":"OpenVPN0","interface-name":"OpenVPN0","type":"OpenVPN","state":"up","link":"up"}
+}`)
+	fg.SetPostSystemNameError("OpenVPN0", errors.New("rci: timeout"))
+	store := ndmsquery.NewInterfaceStore(fg, ndmsquery.NopLogger())
+	if _, err := store.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fg.SetPostSystemNameError("OpenVPN0", nil)
+	fg.SetPostSystemName("OpenVPN0", `"tun0"`)
+	f := newForeignEnv(t, nil, nil)
+	f.ndmsNames = ndmsSystemNames(store)
+
+	if _, err := f.Mark(context.Background(), "tun0"); !errors.Is(err, api.ErrForeignIfaceRejected) {
+		t.Fatalf("Mark(tun0) = %v, ждали отказ «интерфейс роутера»", err)
 	}
 }

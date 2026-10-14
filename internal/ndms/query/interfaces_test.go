@@ -1346,3 +1346,31 @@ func TestInterfaceStore_SystemNames_ByIDNameFailsExistenceCheck(t *testing.T) {
 		t.Fatalf("byID-имя взято из кэша без проверки существования: резолвер спрошен %d раз, ждали 1", n)
 	}
 }
+
+// UnnamedIDs — только те, кому резолвер не ответил. Пустой ответ — ответ
+// (имени у записи нет), порт своего устройства не имеет, класс из таблицы
+// ndms.KernelName назван номером записи.
+func TestInterfaceStore_UnnamedIDs(t *testing.T) {
+	fg := newFakeGetter()
+	fg.SetJSON(ifaceListPath, `{
+		"OpenVPN0": {"id":"OpenVPN0","type":"OpenVPN","state":"up"},
+		"UsbQmi0": {"id":"UsbQmi0","type":"UsbQmi","state":"down"},
+		"Wireguard0": {"id":"Wireguard0","type":"Wireguard","state":"up"},
+		"GigabitEthernet0/0": {"id":"GigabitEthernet0/0","type":"Port","state":"up"}
+	}`)
+	// Резолвер не отвечает никому (ответа в фейке нет — ошибка); пустой ответ
+	// для UsbQmi0 кладётся напрямую.
+	s := NewInterfaceStore(fg, NopLogger())
+	if _, err := s.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s.rememberSystemName("UsbQmi0", "")
+
+	got, err := s.UnnamedIDs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(got) != "[OpenVPN0]" {
+		t.Fatalf("UnnamedIDs = %v, want [OpenVPN0]", got)
+	}
+}

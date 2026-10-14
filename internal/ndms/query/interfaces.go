@@ -367,23 +367,50 @@ func (s *InterfaceStore) beginFlightLocked() *listFlight {
 func (s *InterfaceStore) unnamedLocked(raw map[string]ndms.Interface, start uint64) []string {
 	var todo []string
 	for id, rec := range raw {
-		if rec.Type == "Port" || s.goneSinceLocked(id, start) {
-			continue
-		}
-		if _, ok := ndms.KernelName(id); ok {
-			continue
-		}
-		if _, ok := s.sysNames[id]; ok {
-			continue
-		}
-		iface, ok := s.byID[id]
-		if !ok || trustedSystemName(id, iface.SystemName) {
+		if s.goneSinceLocked(id, start) || !s.unnamedIDLocked(id, rec.Type) {
 			continue
 		}
 		todo = append(todo, id)
 	}
 	sort.Strings(todo)
 	return todo
+}
+
+// unnamedIDLocked — имени ядра записи id не знает никто, хотя оно у неё есть:
+// не порт, класс не из таблицы ndms.KernelName, ни хук, ни резолвер не
+// ответили (пустой ответ резолвера — тоже ответ), `interface-name` не годится.
+func (s *InterfaceStore) unnamedIDLocked(id, typ string) bool {
+	if typ == "Port" {
+		return false
+	}
+	if _, ok := ndms.KernelName(id); ok {
+		return false
+	}
+	if _, ok := s.sysNames[id]; ok {
+		return false
+	}
+	iface, ok := s.byID[id]
+	return ok && !trustedSystemName(id, iface.SystemName)
+}
+
+// UnnamedIDs — записи NDMS, чьё имя ядра сейчас не известно (резолвер не
+// ответил: сбой транспорта, ответ не разобран). ListAll такие пропускает
+// молча; кому пропуск небезопасен (отметка стороннего интерфейса, F514),
+// отказывает по непустому ответу. RCI — никогда.
+func (s *InterfaceStore) UnnamedIDs(ctx context.Context) ([]string, error) {
+	if err := s.ensureBootstrap(ctx); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []string
+	for id, iface := range s.byID {
+		if s.unnamedIDLocked(id, iface.Type) {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // applyListLocked кладёт свежий список в карту (П1): каждая запись — целиком,
