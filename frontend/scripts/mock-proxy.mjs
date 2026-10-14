@@ -75,6 +75,9 @@ const UPSTREAM = process.env.UPSTREAM ?? 'http://127.0.0.1:8080';
 // вероятностные сбои) становится воспроизводимой — скриншот-сравнение
 // рефакторингов UI требует бит-в-бит одинаковых ответов между прогонами.
 const DETERMINISTIC = ['1', 'true'].includes(String(process.env.MOCK_DETERMINISTIC ?? ''));
+// MOCK_POLICY_TUN_ROUTE_LOST=1 — в policy-tun статус несёт замечание
+// policy-tun-route-lost (severity error), F388.
+const POLICY_TUN_ROUTE_LOST = ['1', 'true'].includes(String(process.env.MOCK_POLICY_TUN_ROUTE_LOST ?? ''));
 const rand = () => (DETERMINISTIC ? 0.5 : Math.random());
 
 const PORT = Number(process.env.PORT ?? 8081);
@@ -7356,6 +7359,17 @@ const server = http.createServer(async (req, res) => {
 									message:
 										'Интерфейс OpkgTun0 не разрешён ни в одной политике доступа — трафик устройств в туннель не заходит',
 								},
+								// MOCK_POLICY_TUN_ROUTE_LOST=1 — красное замечание бэкенда
+								// (service_lifecycle.go, issuePolicyTunRouteLost): без него вид
+								// error в секции замечаний в dev не воспроизводится (F388).
+								...(POLICY_TUN_ROUTE_LOST
+									? [{
+											severity: 'error',
+											kind: 'policy-tun-route-lost',
+											message:
+												'в таблице 42 нет дефолта через OpkgTun0 — трафик клиентов идёт мимо sing-box; переустанавливаю',
+										}]
+									: []),
 							],
 						}
 					: {}),
