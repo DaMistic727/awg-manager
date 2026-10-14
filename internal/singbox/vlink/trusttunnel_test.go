@@ -108,6 +108,33 @@ func TestParseBatch_TrustTunnelThreeLineExport(t *testing.T) {
 	if len(res.Outbounds) != 1 {
 		t.Fatalf("want 1 outbound, got %d (errors %v)", len(res.Outbounds), res.Errors)
 	}
+	// Подсказка рядом с годной ссылкой — не ошибка (F400).
+	if len(res.Errors) != 0 || res.SkippedUnsupp != 0 {
+		t.Fatalf("подсказка посчитана ошибкой: errors=%v skipped=%d", res.Errors, res.SkippedUnsupp)
+	}
+}
+
+// F400: ссылка с мусором вокруг (маркер списка, кавычки, BOM) — не проза:
+// её отказ доходит до пользователя и рядом с годной ссылкой.
+func TestParseBatch_DecoratedLinkStaysError(t *testing.T) {
+	for _, line := range []string{"- vless://bad", "1. vless://bad", `"vless://bad"`, "\ufeffvless://bad"} {
+		res := ParseBatch([]string{"tt://?" + ttOne, line})
+		if len(res.Outbounds) != 1 || len(res.Errors) != 1 || res.Errors[0].LineIdx != 1 {
+			t.Errorf("%q: outbounds=%d errors=%v — ссылка пропала молча", line, len(res.Outbounds), res.Errors)
+		}
+	}
+}
+
+// F400: без единой годной ссылки строка-проза остаётся ошибкой — иначе
+// вставка мусора ответила бы молчанием; ошибки идут по порядку строк.
+func TestParseBatch_ProseWithoutLinksStaysError(t *testing.T) {
+	res := ParseBatch([]string{"hello", "vless://bad", "world"})
+	if len(res.Errors) != 3 || res.Errors[0].LineIdx != 0 || res.Errors[1].LineIdx != 1 || res.Errors[2].LineIdx != 2 {
+		t.Fatalf("errors=%v", res.Errors)
+	}
+	if res.SkippedUnsupp != 2 {
+		t.Fatalf("SkippedUnsupp=%d want 2", res.SkippedUnsupp)
+	}
 }
 
 func TestTTEndpointToOutbounds_CertificatePEM(t *testing.T) {

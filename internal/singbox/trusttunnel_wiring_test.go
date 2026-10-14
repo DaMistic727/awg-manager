@@ -38,3 +38,13 @@ func TestDetectTransport_TrustTunnel(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// F408: фронт переводит отказ по регулярке `missing sing-box build tag "…"`
+// (linkImportError.ts) — форма общего сообщения обязана её держать.
+func TestMissingBuildTagMsg_FrontendContract(t *testing.T) {
+	got := MissingBuildTagMsg("with_trusttunnel", "trusttunnel")
+	want := `missing sing-box build tag "with_trusttunnel", update sing-box to a version supporting trusttunnel`
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}

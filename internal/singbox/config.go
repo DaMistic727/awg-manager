@@ -659,6 +659,14 @@ func outboundRequiresFeature(obType string) string {
 	return ""
 }
 
+// MissingBuildTagMsg — хвост отказа «протокол вне сборки бинаря». Один на
+// все места (F408): фронт переводит его по регулярке `missing sing-box build
+// tag "…"` (linkImportError.ts), и переформулировка одной копии молча
+// вернула бы перевод к общему правилу.
+func MissingBuildTagMsg(tag, obType string) string {
+	return fmt.Sprintf("missing sing-box build tag %q, update sing-box to a version supporting %s", tag, obType)
+}
+
 // OutboundTypeRequiresFeature exposes outboundRequiresFeature for
 // cross-package callers (Operator, orchestrator, subscription layer).
 func OutboundTypeRequiresFeature(obType string) string {

@@ -265,7 +265,7 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 			}
 			parseErrs = append(parseErrs, BatchError{
 				Input: p.Label,
-				Err:   fmt.Errorf("%s: missing sing-box build tag %q, update sing-box to a version supporting %s", p.Protocol, required, p.Protocol),
+				Err:   fmt.Errorf("%s: %s", p.Protocol, MissingBuildTagMsg(required, p.Protocol)),
 			})
 			continue
 		}

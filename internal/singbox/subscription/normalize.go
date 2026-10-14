@@ -23,7 +23,9 @@ var shareURLStartHTML = regexp.MustCompile(`(?i)(?:^|[\s"'<>=]+)(` + shareScheme
 func trimShareURLSuffix(u string) string {
 	u = strings.TrimSpace(u)
 	lower := strings.ToLower(u)
-	if strings.HasPrefix(lower, "mieru://") || strings.HasPrefix(lower, "mierus://") {
+	// Хвост после пробела у этих схем — подпись провайдера («— 28 дней»), а
+	// не часть ссылки: base64 tt:// и mieru пробелов не содержат (F403).
+	if strings.HasPrefix(lower, "mieru://") || strings.HasPrefix(lower, "mierus://") || strings.HasPrefix(lower, "tt://") {
 		if fields := strings.Fields(u); len(fields) > 0 {
 			u = fields[0]
 		}

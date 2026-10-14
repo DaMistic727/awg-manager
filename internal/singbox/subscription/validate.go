@@ -163,8 +163,8 @@ func classifyOutbound(ob map[string]any) string {
 // classifyOutboundFeatureSupport returns "" when the outbound's required
 // build tag (if any) is present in singboxFeatures. Otherwise returns a
 // short human-readable reason string like
-// "naive: missing sing-box build tag with_naive_outbound,
-// update sing-box to a version supporting naive".
+// `naive: missing sing-box build tag "with_naive_outbound",
+// update sing-box to a version supporting naive` (singbox.MissingBuildTagMsg).
 func classifyOutboundFeatureSupport(ob map[string]any, singboxFeatures []string) string {
 	typ, _ := ob["type"].(string)
 	if typ == "" || typ == "selector" || typ == "urltest" {
@@ -177,10 +177,7 @@ func classifyOutboundFeatureSupport(ob map[string]any, singboxFeatures []string)
 	if singbox.OutboundSupportedByFeatures(singboxFeatures, typ) {
 		return ""
 	}
-	return fmt.Sprintf(
-		"%s: missing sing-box build tag %q, update sing-box to a version supporting %s",
-		typ, required, typ,
-	)
+	return typ + ": " + singbox.MissingBuildTagMsg(required, typ)
 }
 
 // checkRealityUTLS reports the "reality requires uTLS" structural rule

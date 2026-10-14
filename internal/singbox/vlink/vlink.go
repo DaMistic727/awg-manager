@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -148,6 +150,15 @@ func ParseBatch(lines []string) BatchResult {
 	out := BatchResult{
 		Outbounds: make([]ParsedOutbound, 0, len(lines)),
 	}
+	// Строка без единой схемы ссылки рядом с годными ссылками — подсказка, а
+	// не ошибка: сервер TrustTunnel печатает вокруг ссылки пустую строку и
+	// «To connect on mobile, you can scan QR code on the page: https://…», и
+	// вставка вывода целиком давала «ошибок: 1» (F400). Схема ищется по всей
+	// строке, а не в начале: `- vless://…`, `1. vless://…`, ссылка в кавычках
+	// — ссылка с мусором, её отказ обязан дойти до пользователя. Без единой
+	// годной ссылки и проза остаётся ошибкой — иначе вставка чистого мусора
+	// ответила бы молчанием.
+	var prose []ParseError
 	for i, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -161,8 +172,13 @@ func ParseBatch(lines []string) BatchResult {
 				continue
 			}
 			if errors.Is(err, ErrUnsupportedScheme) {
+				pe := ParseError{LineIdx: i, Scheme: scheme, Message: err.Error()}
+				if !shareSchemeAnywhere.MatchString(line) {
+					prose = append(prose, pe)
+					continue
+				}
 				out.SkippedUnsupp++
-				out.Errors = append(out.Errors, ParseError{LineIdx: i, Scheme: scheme, Message: err.Error()})
+				out.Errors = append(out.Errors, pe)
 				continue
 			}
 			out.Errors = append(out.Errors, ParseError{LineIdx: i, Scheme: scheme, Message: err.Error()})
@@ -170,8 +186,17 @@ func ParseBatch(lines []string) BatchResult {
 		}
 		out.Outbounds = append(out.Outbounds, parsed...)
 	}
+	if len(out.Outbounds) == 0 && len(prose) > 0 {
+		out.SkippedUnsupp += len(prose)
+		out.Errors = append(out.Errors, prose...)
+		slices.SortStableFunc(out.Errors, func(a, b ParseError) int { return a.LineIdx - b.LineIdx })
+	}
 	return out
 }
+
+// shareSchemeAnywhere — в строке есть схема ссылки, которую разбирает
+// ParseLinkMany (включая отброшенную vmess), в любом месте строки.
+var shareSchemeAnywhere = regexp.MustCompile(`(?i)(?:^|[^a-z0-9+.\-])(?:vless|trojan|ss|hysteria2|hy2|naive\+[a-z0-9]+|vpn|mieru|mierus|socks5?|tt|vmess)://`)
 
 func detectScheme(line string) string {
 	if i := strings.Index(line, "://"); i > 0 {

@@ -1575,8 +1575,7 @@ func (o *Operator) checkOutboundFeatures() error {
 				tag = fmt.Sprintf("<no-tag index=%d>", i)
 			}
 			unsupported = append(unsupported, fmt.Sprintf(
-				"%s outbounds[%d] %q (%s): missing sing-box build tag %q, update sing-box to version supporting %s",
-				name, i, tag, typ, required, typ,
+				"%s outbounds[%d] %q (%s): %s", name, i, tag, typ, MissingBuildTagMsg(required, typ),
 			))
 		}
 	}

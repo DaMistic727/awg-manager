@@ -120,3 +120,12 @@ func TestJsonUnescapeURL(t *testing.T) {
 		}
 	}
 }
+
+// F403: подпись провайдера после пробела у tt:// — не часть ссылки; без
+// обрезки base64 уходил в декодер целиком и падал.
+func TestNormalize_TTTrailingCaption(t *testing.T) {
+	lines := NormalizeBody([]byte("tt://?AAAA — 28 дней\n"), "text/plain")
+	if len(lines) != 1 || lines[0] != "tt://?AAAA" {
+		t.Fatalf("lines=%q want [tt://?AAAA]", lines)
+	}
+}
