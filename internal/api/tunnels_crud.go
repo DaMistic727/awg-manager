@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -760,11 +762,19 @@ func (h *TunnelsHandler) Export(w http.ResponseWriter, r *http.Request) {
 	if stored.Obfuscator != nil {
 		content += "\n" + obfuscator.RenderInstance(stored.Obfuscator)
 	}
-	filename := stored.Name + ".conf"
-
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	// Имя — свободная строка: кавычку экранирует, кириллицу кодирует по
+	// RFC 2231 (filename*=utf-8'') stdlib, а не склейка строк (F646).
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment",
+		map[string]string{"filename": exportFileName(stored.Name)}))
 	w.Write([]byte(content))
+}
+
+// exportFileName — имя файла .conf из имени туннеля без разделителей пути:
+// имя `../../x` в архиве — zip-slip у неосторожного распаковщика, `/` —
+// лишние каталоги (F647).
+func exportFileName(name string) string {
+	return strings.NewReplacer("/", "_", "\\", "_").Replace(name) + ".conf"
 }
 
 // ExportAll returns all tunnel configs as a downloadable ZIP archive.
@@ -797,13 +807,21 @@ func (h *TunnelsHandler) ExportAll(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 
+	// Одинаковые имена туннелей — разные записи архива: иначе распаковщик
+	// перезаписал бы одну другой (F647).
+	used := map[string]bool{}
 	for _, t := range tunnels {
 		stored, err := h.store.Get(t.ID)
 		if err != nil {
 			continue
 		}
 		content := config.GenerateForExport(stored)
-		fw, err := zw.Create(stored.Name + ".conf")
+		entry := exportFileName(stored.Name)
+		for i := 2; used[entry]; i++ {
+			entry = exportFileName(fmt.Sprintf("%s (%d)", stored.Name, i))
+		}
+		used[entry] = true
+		fw, err := zw.Create(entry)
 		if err != nil {
 			continue
 		}
