@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2823,5 +2824,64 @@ func TestService_SyncProxies_LeftCreatedContinues(t *testing.T) {
 	}
 	if len(mut.ensuredProxies) != 2 {
 		t.Fatalf("EnsureProxy: %+v", mut.ensuredProxies)
+	}
+}
+
+// F652: flush отбросил добавленный вручную сервер — в записи его быть не
+// должно (UI показал бы сервер, которого нет в селекторе), а вызывающий
+// получает отказ проверки.
+func TestService_AddManualMember_DroppedByFlushIsRolledBack(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mut := &fakeMutator{}
+	svc := NewService(store, mut)
+	sub, err := svc.Create(context.Background(), CreateInput{
+		Label:   "manual",
+		Inline:  "vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h1.example:443?security=tls&sni=h\n",
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Объявленными после flush остались только селектор и прежний член.
+	mut.declaredTags = append([]string{sub.SelectorTag}, sub.MemberTags...)
+
+	_, err = svc.AddManualMember(context.Background(), sub.ID, "trojan://p@h2.example:443?security=tls&sni=h")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("err = %v, want ErrValidation", err)
+	}
+	got, _ := store.Get(sub.ID)
+	if !slices.Equal(got.MemberTags, sub.MemberTags) {
+		t.Fatalf("MemberTags = %v, want прежние %v", got.MemberTags, sub.MemberTags)
+	}
+
+	// Тот же сервер, материализованный flush'ем, — добавляется.
+	mut.declaredTags = nil
+	added, err := svc.AddManualMember(context.Background(), sub.ID, "trojan://p@h2.example:443?security=tls&sni=h")
+	if err != nil || len(added.MemberTags) != len(sub.MemberTags)+1 {
+		t.Fatalf("материализованный сервер не добавлен: err=%v tags=%v", err, added)
+	}
+}
+
+// F652: отказ коммита (адаптер откатил пакет) — в записи нового члена нет.
+func TestService_AddManualMember_ReloadFailureRollsBackStore(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mut := &fakeMutator{}
+	svc := NewService(store, mut)
+	sub, err := svc.Create(context.Background(), CreateInput{
+		Label:   "manual",
+		Inline:  "vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h1.example:443?security=tls&sni=h\n",
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	mut.reloadErr = errors.New("sing-box check failed")
+
+	if _, err := svc.AddManualMember(context.Background(), sub.ID, "trojan://p@h2.example:443?security=tls&sni=h"); err == nil {
+		t.Fatal("отказ коммита обязан дойти до вызывающего")
+	}
+	got, _ := store.Get(sub.ID)
+	if !slices.Equal(got.MemberTags, sub.MemberTags) {
+		t.Fatalf("MemberTags = %v, want прежние %v", got.MemberTags, sub.MemberTags)
 	}
 }

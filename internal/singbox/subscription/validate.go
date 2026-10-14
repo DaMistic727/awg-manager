@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -303,9 +304,20 @@ func cleanReferencesToTag(cfg *slotConfig, tag string) {
 				filtered = append(filtered, t)
 			}
 		}
+		def, _ := ob["default"].(string)
+		if len(filtered) == len(raw) && def != tag {
+			i++
+			continue
+		}
+		// Правка — на копии карты: снимок пакета (slotSnapshot) неглубокий,
+		// и урезанная по месту карта пережила бы откат неудачного flush —
+		// следующая запись (или PersistSelectorDefault) унесла бы её на диск
+		// мимо проверки (F653).
+		ob = maps.Clone(ob)
+		cfg.Outbounds[i] = ob
 		ob["outbounds"] = filtered
 		// selector.default may point at the dropped tag; re-aim or drop selector.
-		if def, _ := ob["default"].(string); def == tag {
+		if def == tag {
 			if len(filtered) > 0 {
 				ob["default"] = stringOf(filtered[0])
 			} else {

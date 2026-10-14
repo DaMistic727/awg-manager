@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -644,14 +645,14 @@ func (s *Service) refreshLockedOpts(ctx context.Context, id string, forceInlineR
 		var errMsg string
 		switch {
 		case isClash && emptyClean:
-			errMsg = "subscription: подписка пуста (proxies: []). Возможно, истекла или ещё не активирована — проверь на стороне провайдера."
+			errMsg = "subscription: " + EmptyFeedMarker + " (proxies: []). Возможно, истекла или ещё не активирована — проверь на стороне провайдера."
 		case isSbJSON && emptyClean:
-			errMsg = "subscription: подписка пуста (outbounds: []). Возможно, истекла или ещё не активирована — проверь на стороне провайдера."
+			errMsg = "subscription: " + EmptyFeedMarker + " (outbounds: []). Возможно, истекла или ещё не активирована — проверь на стороне провайдера."
 		case len(parseRes.Errors) > 0:
-			hint := "ни одной валидной ссылки. Поддерживаются: base64-encoded share-links, HTML с share-link якорями, plain text со ссылками vless://, trojan://, ss://, hysteria2://, mieru://, mierus://, tt:// (TrustTunnel), Clash YAML / mihomo, sing-box JSON (одиночный, массив конфигов, или массив outbounds; типы vless, trojan, ss, hysteria2, mieru), а также mieru JSON config (формат mieru apply config, экспорт панелей), TOML-конфиг TrustTunnel (экспорт endpoint или конфиг клиента). Записи vmess пропускаются."
+			hint := NoValidLinksMarker + ". Поддерживаются: base64-encoded share-links, HTML с share-link якорями, plain text со ссылками vless://, trojan://, ss://, hysteria2://, mieru://, mierus://, tt:// (TrustTunnel), Clash YAML / mihomo, sing-box JSON (одиночный, массив конфигов, или массив outbounds; типы vless, trojan, ss, hysteria2, mieru), а также mieru JSON config (формат mieru apply config, экспорт панелей), TOML-конфиг TrustTunnel (экспорт endpoint или конфиг клиента). Записи vmess пропускаются."
 			errMsg = fmt.Sprintf("subscription: %s Первая ошибка парсера: %s", hint, parseRes.Errors[0].Error())
 		default:
-			hint := "ни одной валидной ссылки. Поддерживаются: base64-encoded share-links, HTML с share-link якорями, plain text со ссылками vless://, trojan://, ss://, hysteria2://, mieru://, mierus://, tt:// (TrustTunnel), Clash YAML / mihomo, sing-box JSON (одиночный, массив конфигов, или массив outbounds; типы vless, trojan, ss, hysteria2, mieru), а также mieru JSON config (формат mieru apply config, экспорт панелей), TOML-конфиг TrustTunnel (экспорт endpoint или конфиг клиента). Записи vmess пропускаются."
+			hint := NoValidLinksMarker + ". Поддерживаются: base64-encoded share-links, HTML с share-link якорями, plain text со ссылками vless://, trojan://, ss://, hysteria2://, mieru://, mierus://, tt:// (TrustTunnel), Clash YAML / mihomo, sing-box JSON (одиночный, массив конфигов, или массив outbounds; типы vless, trojan, ss, hysteria2, mieru), а также mieru JSON config (формат mieru apply config, экспорт панелей), TOML-конфиг TrustTunnel (экспорт endpoint или конфиг клиента). Записи vmess пропускаются."
 			if len(parts.Info) > 0 {
 				hint += fmt.Sprintf(" (инфо-строк провайдера: %d — не являются серверами)", len(parts.Info))
 			}
@@ -1386,6 +1387,14 @@ var ErrInvalidInput = errors.New("subscription: invalid input")
 // the problem, not the daemon.
 var ErrValidation = errors.New("subscription: validation failed")
 
+// Маркеры текста LastError, по которым MCP различает вид отказа обновления
+// (localdeps.lastErrorKind). Константы, а не договорённость о формулировке:
+// правка текста здесь же правит и классификатор (MC14).
+const (
+	EmptyFeedMarker    = "подписка пуста"
+	NoValidLinksMarker = "ни одной валидной ссылки"
+)
+
 // ErrShareLinkInvalid is returned when AddManualMember could not parse
 // the supplied share-link into exactly one outbound.
 var ErrShareLinkInvalid = errors.New("subscription: share-link did not parse to a single outbound")
@@ -1516,9 +1525,33 @@ func (s *Service) AddManualMember(ctx context.Context, id, shareLink string) (*S
 			return err
 		}
 
+		// Запись подписки — к прежнему составу, когда новый член в конфиг не
+		// попал: иначе UI показал бы сервер, которого в селекторе нет, а выбор
+		// его падал бы на Clash (F652).
+		restore := func() error {
+			return s.store.SetMembersExtras(id, sub.Members, sub.OrphanTags, sub.RejectedMembers, sub.InfoItems, sub.ExcludedMembers, sub.FilteredMembers)
+		}
 		if err := s.reloadWithGroups(ctx); err != nil {
+			// Адаптер откатил пакет к снимку — без члена.
 			s.logWarn("subscription-member-add", id, "reload failed: "+err.Error())
+			if rErr := restore(); rErr != nil {
+				return fmt.Errorf("reload: %w (store rollback: %v)", err, rErr)
+			}
 			return fmt.Errorf("reload: %w", err)
+		}
+		// Flush мог отбросить сервер (тег сборки, отказ sing-box check) и снять
+		// ссылки на него. Сверка — та же, что у Refresh (filterDeclaredMembers:
+		// пустой список объявленных — «неизвестно», не сверяем).
+		declared := make(map[string]bool)
+		for _, t := range s.mutator.DeclaredOutboundTags() {
+			declared[t] = true
+		}
+		if _, dropped := filterDeclaredMembers(newMembers, declared); slices.Contains(dropped, tag) {
+			if err := restore(); err != nil {
+				return err
+			}
+			s.logWarn("subscription-member-add", id, "member dropped by validation: "+tag)
+			return fmt.Errorf("%w: сервер отброшен при применении конфигурации sing-box", ErrValidation)
 		}
 		return nil
 	}); err != nil {

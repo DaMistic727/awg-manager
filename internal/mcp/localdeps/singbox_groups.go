@@ -71,15 +71,16 @@ func (l *Local) ListSingboxSubscriptions(context.Context) ([]mcpsrv.SingboxSubsc
 // == 0") and are true when present. Everything else is other: the same
 // field records a failed download, an unreadable file, a body that is not
 // a server list, a failed apply or reload, an undecryptable link and a bad
-// filter, and the text cannot be told apart reliably. If the daemon's
-// wording changes, the answer degrades to other; it never leaks.
+// filter, and the text cannot be told apart reliably. The markers are
+// constants shared with the service (subscription.EmptyFeedMarker,
+// NoValidLinksMarker), so rewording one side rewords both.
 func lastErrorKind(s *subscription.Subscription) string {
 	switch {
 	case s.LastError == "":
 		return ""
-	case strings.Contains(s.LastError, "подписка пуста"):
+	case strings.Contains(s.LastError, subscription.EmptyFeedMarker):
 		return "empty"
-	case strings.Contains(s.LastError, "ни одной валидной ссылки"):
+	case strings.Contains(s.LastError, subscription.NoValidLinksMarker):
 		return "parse"
 	}
 	return "other"

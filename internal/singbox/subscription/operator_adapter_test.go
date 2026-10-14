@@ -369,3 +369,22 @@ func TestOperatorAdapter_PersistSelectorDefault_DoesNotLeakOpenBatch(t *testing.
 		})
 	}
 }
+
+// F653: снимок пакета неглубокий — чистка ссылок на снятый тег не должна
+// править карту селектора по месту, иначе урезанная карта переживёт откат
+// неудачного flush.
+func TestCleanReferencesToTag_DoesNotMutateSharedSelector(t *testing.T) {
+	sel := map[string]any{"type": "selector", "tag": "grp", "outbounds": []any{"a", "b"}, "default": "a"}
+	snapshot := []any{sel}
+	cfg := &slotConfig{Outbounds: append([]any(nil), snapshot...)}
+
+	cleanReferencesToTag(cfg, "a")
+
+	if got := sel["outbounds"].([]any); len(got) != 2 || sel["default"] != "a" {
+		t.Fatalf("карта снимка изменена: %v", sel)
+	}
+	live := cfg.Outbounds[0].(map[string]any)
+	if got := live["outbounds"].([]any); len(got) != 1 || live["default"] != "b" {
+		t.Fatalf("живая карта не очищена: %v", live)
+	}
+}
