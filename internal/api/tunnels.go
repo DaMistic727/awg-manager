@@ -50,7 +50,7 @@ type TunnelService interface {
 
 	// SyncDescription — описание НАШЕЙ записи в NDMS = name; prevName — имя
 	// до переименования, по нему проверяется владение (F517).
-	SyncDescription(ctx context.Context, tunnelID, prevName, name string)
+	SyncDescription(ctx context.Context, tunnelID, prevName, name, earlierName string)
 
 	// WAN state model
 	WANModel() *wan.Model

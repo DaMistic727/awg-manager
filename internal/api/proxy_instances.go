@@ -273,6 +273,11 @@ type LinkedTunnelCleaner interface {
 	// туннелей, — поэтому звать его можно и после захвата записи, до её
 	// удаления.
 	DeleteLinked(ctx context.Context, clientID string) (deleted []string, errs []string)
+	// RenameLinked ведёт имена связанных туннелей за переименованием инстанса
+	// (F665): туннель с прежним именем инстанса или его производным получает
+	// то же от нового; имя, заданное пользователем, не трогается. Отказы
+	// пишет в журнал сам — переименование инстанса они не отменяют.
+	RenameLinked(ctx context.Context, clientID, oldName, newName string) (renamed []string)
 }
 
 // ProxyInstancesHandler обслуживает /api/proxyrt/instances*.
@@ -485,7 +490,8 @@ func (h *ProxyInstancesHandler) patch(w http.ResponseWriter, r *http.Request, ke
 	if !h.requireSeeded(w) {
 		return
 	}
-	if _, ok := h.recordByKey(key); !ok {
+	before, ok := h.recordByKey(key)
+	if !ok {
 		h.notFound(w, key)
 		return
 	}
@@ -537,6 +543,13 @@ func (h *ProxyInstancesHandler) patch(w http.ResponseWriter, r *http.Request, ke
 	if err != nil {
 		h.fail(w, err)
 		return
+	}
+	if req.Name != nil {
+		if newName := strings.TrimSpace(*req.Name); newName != before.Name {
+			if c, ok := h.deps.Cleaners[before.Kind]; ok {
+				c.RenameLinked(r.Context(), before.ID, before.Name, newName)
+			}
+		}
 	}
 	h.respondRecord(w, key)
 }

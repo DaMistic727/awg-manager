@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -46,6 +47,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/sys/routerclock"
 	"github.com/hoaxisr/awg-manager/internal/testing"
 	"github.com/hoaxisr/awg-manager/internal/traffic"
+	"github.com/hoaxisr/awg-manager/internal/tunnel"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/nwg"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/ops"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/service"
@@ -319,6 +321,79 @@ type proxyLinkedCleaner struct {
 	field   api.LinkedField
 	traffic *traffic.History
 	pub     proxyrt.Publisher
+	journal *logging.ScopedLogger
+}
+
+// linkedTunnelName — имя связанного туннеля, производное от имени инстанса
+// (то же, что ставят мастер выхода и усыновление): «<имя> wdtt» / «<имя> FT».
+func (c proxyLinkedCleaner) linkedTunnelName(instanceName string) string {
+	if c.field == api.LinkedFreeTurn {
+		return ftlink.TunnelNameFromClient(instanceName)
+	}
+	return wdttlink.TunnelNameFromClient(instanceName)
+}
+
+func (c proxyLinkedCleaner) RenameLinked(ctx context.Context, clientID, oldName, newName string) (renamed []string) {
+	if strings.TrimSpace(clientID) == "" || c.store == nil || c.svc == nil {
+		return nil
+	}
+	tunnels, err := c.store.List()
+	if err != nil {
+		c.warn(clientID, "связанные туннели не переименованы: "+err.Error())
+		return nil
+	}
+	for _, tun := range tunnels {
+		// Зеркальной записью raw-клиента владеет зеркало (MirrorName).
+		if !proxyTunnelLinkedTo(tun, c.field, clientID) || tun.Backend == proxyBackendWdttRaw {
+			continue
+		}
+		want := ""
+		switch tun.Name {
+		case oldName:
+			want = newName
+		case c.linkedTunnelName(oldName):
+			want = c.linkedTunnelName(newName)
+		}
+		if want == "" || want == tun.Name {
+			continue // имя пользователя — не наше дело
+		}
+		if tun.Locked {
+			// Защищённый туннель не правится ничем, кроме снятия защиты (#818).
+			c.warn(tun.ID, fmt.Sprintf("туннель %q защищён — имя не изменено", tun.Name))
+			continue
+		}
+		if err := tunnel.ValidateName(want); err != nil {
+			c.warn(tun.ID, fmt.Sprintf("туннель %q не переименован: %v", tun.Name, err))
+			continue
+		}
+		prev, earlier := tun.Name, ""
+		if err := c.store.Update(tun.ID, func(t *storage.AWGTunnel) error {
+			if t.Name != prev {
+				return storage.ErrNoChange // переименован параллельно — не наше
+			}
+			earlier = t.PrevName // до перезаписи стором — для повтора F535
+			t.Name = want
+			return nil
+		}); err != nil {
+			if !errors.Is(err, storage.ErrNoChange) {
+				c.warn(tun.ID, fmt.Sprintf("туннель %q не переименован: %v", prev, err))
+			}
+			continue
+		}
+		// Описание записи NDMS = имя (F517): иначе после ребута запись чужая.
+		c.svc.SyncDescription(ctx, tun.ID, prev, want, earlier)
+		renamed = append(renamed, tun.ID)
+	}
+	if len(renamed) > 0 {
+		proxyPublishTunnels(c.pub, "proxy-linked-tunnel-rename")
+	}
+	return renamed
+}
+
+func (c proxyLinkedCleaner) warn(subject, msg string) {
+	if c.journal != nil {
+		c.journal.Warn("linked-rename", subject, msg)
+	}
 }
 
 func (c proxyLinkedCleaner) DeleteLinked(ctx context.Context, clientID string) (deleted []string, errs []string) {
@@ -394,7 +469,7 @@ func proxyTunnelLinkedTo(tun storage.AWGTunnel, field api.LinkedField, clientID 
 // удаляются. Один источник поля (proxyLinkedField) и одно место сборки — чтобы
 // перепутать было негде.
 func proxyLinkedCleaners(store *storage.AWGTunnelStore, svc api.TunnelService,
-	traffic *traffic.History, pub proxyrt.Publisher,
+	traffic *traffic.History, pub proxyrt.Publisher, journal *logging.ScopedLogger,
 ) map[instancestore.Kind]api.LinkedTunnelCleaner {
 	out := map[instancestore.Kind]api.LinkedTunnelCleaner{}
 	// Перечень — из канонического источника (instancestore.ClientKinds), а не
@@ -402,7 +477,7 @@ func proxyLinkedCleaners(store *storage.AWGTunnelStore, svc api.TunnelService,
 	// молча.
 	for _, kind := range instancestore.ClientKinds() {
 		out[kind] = proxyLinkedCleaner{store: store, svc: svc,
-			field: proxyLinkedField(kind), traffic: traffic, pub: pub}
+			field: proxyLinkedField(kind), traffic: traffic, pub: pub, journal: journal}
 	}
 	return out
 }
@@ -453,8 +528,8 @@ func (t proxyTunnelImporter) Start(ctx context.Context, tunnelID string) error {
 	return t.svc.Start(ctx, tunnelID)
 }
 
-func (t proxyTunnelImporter) SyncDescription(ctx context.Context, tunnelID, prevName, name string) {
-	t.svc.SyncDescription(ctx, tunnelID, prevName, name)
+func (t proxyTunnelImporter) SyncDescription(ctx context.Context, tunnelID, prevName, name, earlierName string) {
+	t.svc.SyncDescription(ctx, tunnelID, prevName, name, earlierName)
 }
 
 func (t proxyTunnelImporter) AddressConflicts(address string) []string {
@@ -951,7 +1026,7 @@ func (a *app) wireProxyrt() {
 	// Уборщик связанных туннелей — один на систему; потребитель у него теперь
 	// тоже один: путь удаления инстанса. Ручка linked-tunnels/clear снесена
 	// вместе со своим единственным вызывающим на фронте (PF24).
-	linkedCleaners := proxyLinkedCleaners(a.awgStore, a.proxyTunnels(), a.trafficHistory, a.eventBus)
+	linkedCleaners := proxyLinkedCleaners(a.awgStore, a.proxyTunnels(), a.trafficHistory, a.eventBus, journal)
 
 	linkHandler := wdttlink.NewHandler(wdttlink.Deps{
 		Records:   records,

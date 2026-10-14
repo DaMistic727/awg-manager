@@ -83,7 +83,7 @@ type fakeTunnels struct {
 
 type describeCall struct{ ID, Prev, Name string }
 
-func (f *fakeTunnels) SyncDescription(_ context.Context, id, prevName, name string) {
+func (f *fakeTunnels) SyncDescription(_ context.Context, id, prevName, name, _ string) {
 	f.described = append(f.described, describeCall{id, prevName, name})
 	f.order = append(f.order, "describe:"+id)
 }

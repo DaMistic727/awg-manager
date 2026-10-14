@@ -1123,7 +1123,12 @@ func TestProxyServerKeysAreServersOnly(t *testing.T) {
 // вызов чего-то ещё уронит тест, а не пройдёт молча.
 type stubTunnelSvc struct {
 	api.TunnelService
-	deleted []string
+	deleted   []string
+	described []string
+}
+
+func (s *stubTunnelSvc) SyncDescription(_ context.Context, id, prev, name, earlier string) {
+	s.described = append(s.described, id+"|"+prev+"|"+name+"|"+earlier)
 }
 
 func (s *stubTunnelSvc) Delete(_ context.Context, id string) error {
@@ -1156,7 +1161,7 @@ func TestProxyLinkedCleanersDeleteOwnFieldOnly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
 			svc := &stubTunnelSvc{}
-			cleaners := proxyLinkedCleaners(store, svc, nil, nil)
+			cleaners := proxyLinkedCleaners(store, svc, nil, nil, nil)
 			cleaner, ok := cleaners[tt.kind]
 			if !ok {
 				t.Fatalf("уборщика для роли %s нет", tt.kind)
@@ -1195,7 +1200,7 @@ func TestProxyLinkedCleanerSkipsMirrorRecord(t *testing.T) {
 	}
 
 	svc := &stubTunnelSvc{}
-	cleaner := proxyLinkedCleaners(store, svc, nil, nil)[instancestore.KindWdttClient]
+	cleaner := proxyLinkedCleaners(store, svc, nil, nil, nil)[instancestore.KindWdttClient]
 	deleted, errs := cleaner.DeleteLinked(context.Background(), "same")
 
 	if len(deleted) != 1 || deleted[0] != "awg10" {
@@ -1385,5 +1390,44 @@ func TestProxyRecordIfacesSeesKernelHalf(t *testing.T) {
 	}
 	if idx, _ := opkgtun.IndexOf(proxyRecordIfaces(client)[0].iface); idx != 13 {
 		t.Fatalf("клиент: номер %d, want 13", idx)
+	}
+}
+
+// F665: за переименованием инстанса идут только имена, которые панель сама
+// вывела из него (прежнее имя инстанса и «<имя> wdtt»); имя пользователя,
+// туннель другой связи и зеркальная запись не трогаются. Описание NDMS
+// синхронизируется с прежним именем (F517).
+func TestProxyLinkedCleanerRenameLinked(t *testing.T) {
+	dir := t.TempDir()
+	store := storage.NewAWGTunnelStoreWithLockDir(filepath.Join(dir, "tunnels"), filepath.Join(dir, "lock"))
+	for _, tun := range []*storage.AWGTunnel{
+		{ID: "awg10", Name: "Нидерланды wdtt", WdttClientID: "nl", PrevName: "Амстердам wdtt"},
+		{ID: "awg11", Name: "Нидерланды", WdttClientID: "nl"},
+		{ID: "awg12", Name: "Мой туннель", WdttClientID: "nl"},
+		{ID: "awg14", Name: "Нидерланды", WdttClientID: "nl", Locked: true},
+		{ID: "awg13", Name: "Нидерланды wdtt", WdttClientID: "de"},
+		{ID: "wdttraw-nl", Name: "Нидерланды", Backend: proxyBackendWdttRaw, WdttClientID: "nl"},
+	} {
+		if err := store.Create(tun); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := &stubTunnelSvc{}
+	cleaner := proxyLinkedCleaners(store, svc, nil, nil, nil)[instancestore.KindWdttClient]
+
+	renamed := cleaner.RenameLinked(context.Background(), "nl", "Нидерланды", "Берлин")
+	if !slices.Equal(renamed, []string{"awg10", "awg11"}) {
+		t.Fatalf("переименованы %v, want [awg10 awg11]", renamed)
+	}
+	for id, want := range map[string]string{
+		"awg10": "Берлин wdtt", "awg11": "Берлин", "awg12": "Мой туннель",
+		"awg13": "Нидерланды wdtt", "wdttraw-nl": "Нидерланды", "awg14": "Нидерланды",
+	} {
+		if got, _ := store.Get(id); got.Name != want {
+			t.Errorf("%s = %q, want %q", id, got.Name, want)
+		}
+	}
+	if !slices.Equal(svc.described, []string{"awg10|Нидерланды wdtt|Берлин wdtt|Амстердам wdtt", "awg11|Нидерланды|Берлин|"}) {
+		t.Fatalf("описания NDMS: %v", svc.described)
 	}
 }

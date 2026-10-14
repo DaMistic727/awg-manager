@@ -9,6 +9,7 @@ import (
 
 	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/tunnel"
+	"github.com/hoaxisr/awg-manager/internal/tunnel/ops"
 )
 
 // Имя туннеля — описание его записи OpkgTun в NDMS, а NDMS принимает не
@@ -167,12 +168,34 @@ func TestSyncAndCaptureDescription_Kernel(t *testing.T) {
 	if err := s.store.Create(&storage.AWGTunnel{ID: "awg10", Name: "Germany wdtt", Backend: "kernel"}); err != nil {
 		t.Fatal(err)
 	}
-	s.SyncDescription(context.Background(), "awg10", "Germany", "Germany wdtt")
+	s.SyncDescription(context.Background(), "awg10", "Germany", "Germany wdtt", "")
 	s.CaptureDescription(context.Background(), "awg10", "Германия")
 	if want := []descCall{{"awg10", "Germany", "Germany wdtt"}}; !reflect.DeepEqual(op.UpdateDescriptionCalls, want) {
 		t.Fatalf("UpdateDescription = %+v, want %+v", op.UpdateDescriptionCalls, want)
 	}
 	if want := []descCall{{ID: "awg10", Desc: "Германия"}}; !reflect.DeepEqual(op.CaptureDescriptionCalls, want) {
 		t.Fatalf("CaptureDescription = %+v, want %+v", op.CaptureDescriptionCalls, want)
+	}
+}
+
+// F665/F535: путь «сначала стор» (усыновление, переименование инстанса)
+// уже перезаписал PrevName на prevName — повтор с ещё более ранним именем
+// берёт earlierName, снятый вызывающим до записи.
+func TestSyncDescription_RetriesWithEarlierName(t *testing.T) {
+	s, _ := serviceWithStore(t)
+	op := &MockOperator{UpdateDescriptionErr: map[string]error{
+		"B": &ops.ForeignRecordError{NDMSName: "OpkgTun10", Description: "A", Want: "B"},
+	}}
+	s.legacyOperator = op
+	if err := s.store.Create(&storage.AWGTunnel{ID: "awg10", Name: "C", Backend: "kernel", PrevName: "B"}); err != nil {
+		t.Fatal(err)
+	}
+	s.SyncDescription(context.Background(), "awg10", "B", "C", "A")
+	var got []string
+	for _, c := range op.UpdateDescriptionCalls {
+		got = append(got, c.Prev)
+	}
+	if strings.Join(got, ",") != "B,A" {
+		t.Fatalf("prevName вызовов = %v, want [B A]", got)
 	}
 }

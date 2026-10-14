@@ -484,14 +484,19 @@ func (s *ServiceImpl) syncDescription(ctx context.Context, scope string, stored 
 }
 
 // SyncDescription — syncDescription для путей, меняющих имя мимо Update
-// (переименование волной wdttlink).
-func (s *ServiceImpl) SyncDescription(ctx context.Context, tunnelID, prevName, name string) {
+// (усыновление wdttlink, переименование инстанса прокси). Такие пути пишут
+// стор ДО синхронизации, и PrevName в нём уже равен prevName: повтор F535
+// (запись NDMS с ещё более ранним именем) остался бы мёртвым. Поэтому раннее
+// имя вызывающий снимает в мутаторе до перезаписи и передаёт earlierName.
+func (s *ServiceImpl) SyncDescription(ctx context.Context, tunnelID, prevName, name, earlierName string) {
 	stored, err := s.store.Get(tunnelID)
 	if err != nil {
 		s.logWarn("update_description", tunnelID, "Failed to update description: "+err.Error())
 		return
 	}
-	s.syncDescription(ctx, "update_description", stored, prevName, name)
+	cp := *stored
+	cp.PrevName = earlierName
+	s.syncDescription(ctx, "update_description", &cp, prevName, name)
 }
 
 // CaptureDescription — описание записи kernel-туннеля без проверки владения:

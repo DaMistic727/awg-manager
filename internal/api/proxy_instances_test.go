@@ -278,6 +278,12 @@ type fakeLinkedCleaner struct {
 	deleted       []string
 	errs          []string
 	mgr           *fakeProxyManager
+	renames       []string
+}
+
+func (c *fakeLinkedCleaner) RenameLinked(_ context.Context, clientID, oldName, newName string) []string {
+	c.renames = append(c.renames, clientID+"|"+oldName+"|"+newName)
+	return nil
 }
 
 func (c *fakeLinkedCleaner) DeleteLinked(_ context.Context, clientID string) ([]string, []string) {
@@ -1876,5 +1882,34 @@ func TestProxyInstancesPatch_IgnoresClientPins(t *testing.T) {
 					got.WdttClient, got.WdttServer, want.WdttClient, want.WdttServer)
 			}
 		})
+	}
+}
+
+// F665: переименование клиента ведёт за собой имена связанных туннелей —
+// уборщик роли получает id записи, прежнее и новое имя; правка без смены
+// имени его не зовёт.
+func TestProxyInstancesPatch_RenameFollowsLinkedTunnels(t *testing.T) {
+	mgr := &fakeProxyManager{
+		records: []instancestore.Record{fullClientRecord()},
+		seed:    manager.SeedInfo{Booted: true, Certified: true},
+	}
+	cleaner := &fakeLinkedCleaner{mgr: mgr}
+	h := newProxyHandlerWithCleaners(t, mgr, fakeProxyStates{},
+		map[instancestore.Kind]LinkedTunnelCleaner{instancestore.KindWdttClient: cleaner})
+	old := fullClientRecord().Name
+
+	if rr := doProxy(t, h, http.MethodPatch, "/api/proxyrt/instances/wdtt-client:nl", `{"name":" Берлин "}`); rr.Code != http.StatusOK {
+		t.Fatalf("код = %d: %s", rr.Code, rr.Body.String())
+	}
+	if want := []string{"nl|" + old + "|Берлин"}; !reflect.DeepEqual(cleaner.renames, want) {
+		t.Fatalf("переименования = %v, want %v", cleaner.renames, want)
+	}
+
+	cleaner.renames = nil
+	if rr := doProxy(t, h, http.MethodPatch, "/api/proxyrt/instances/wdtt-client:nl", `{"statsLog":"x"}`); rr.Code != http.StatusOK {
+		t.Fatalf("код = %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(cleaner.renames) != 0 {
+		t.Fatalf("переименование без смены имени: %v", cleaner.renames)
 	}
 }
