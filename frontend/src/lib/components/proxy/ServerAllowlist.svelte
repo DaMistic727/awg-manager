@@ -48,10 +48,20 @@
 	 * насовсем при перезагрузке страницы.
 	 */
 	let issued = $state<{ link: string; name: string } | null>(null);
+	/** Абонент без ссылки, которому её выдают (F371); null — новый абонент. */
+	let reissue = $state<{ clientId: string; name: string } | null>(null);
 
 	function closeAdd() {
 		addOpen = false;
 		issued = null;
+		reissue = null;
+	}
+
+	function issueLink(entry: FreeTurnAllowlistEntry) {
+		addError = '';
+		issued = null;
+		reissue = { clientId: entry.clientId, name: entry.comment ?? '' };
+		addOpen = true;
 	}
 
 	function showLink(entry: FreeTurnAllowlistEntry) {
@@ -252,6 +262,7 @@
 			onclick={() => {
 				addError = '';
 				issued = null;
+				reissue = null;
 				addOpen = true;
 			}}
 		>
@@ -279,6 +290,11 @@
 						{#if entry.link}
 							<!-- Показ сохранённой ссылки ничего не мутирует: общий замок сервера ему не указ. -->
 							<Button variant="ghost" size="sm" onclick={() => showLink(entry)}>{m.proxy_allowlist_link()}</Button>
+						{:else}
+							<!-- Абонент до #919: ссылки не сохранилось — выдать её той же формой (F371). -->
+							<Button variant="ghost" size="sm" disabled={busy} onclick={() => issueLink(entry)}>
+								{m.proxy_allowlist_issue_link()}
+							</Button>
 						{/if}
 						<Button
 							variant="ghost"
@@ -318,6 +334,7 @@
 	linkPeer={server.linkPeer ?? ''}
 	link={issued?.link ?? ''}
 	linkFor={issued?.name ?? ''}
+	{reissue}
 	onsubmit={addClient}
 	onclose={closeAdd}
 />

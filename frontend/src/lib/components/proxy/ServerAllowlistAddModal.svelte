@@ -42,6 +42,12 @@
 		link?: string;
 		/** Чья ссылка показана: имя абонента либо его Client ID. */
 		linkFor?: string;
+		/**
+		 * Выдача ссылки СУЩЕСТВУЮЩЕМУ абоненту (запись без ссылки — заведённая до
+		 * #919, F371): Client ID и имя подставлены, ID не меняется, запись в
+		 * списке остаётся (внесение — upsert: запись лишь получает ссылку).
+		 */
+		reissue?: { clientId: string; name: string } | null;
 		onsubmit: (values: AddClientValues) => void;
 		onclose: () => void;
 	}
@@ -54,6 +60,7 @@
 		linkPeer = '',
 		link = '',
 		linkFor = '',
+		reissue = null,
 		onsubmit,
 		onclose,
 	}: Props = $props();
@@ -86,7 +93,14 @@
 	// Закрытая модалка полей не хранит: следующее открытие начинается с чистой
 	// формы и нового Client ID.
 	$effect(() => {
-		if (open) return;
+		if (open) {
+			if (reissue) {
+				clientId = reissue.clientId;
+				name = reissue.name;
+				allow = true;
+			}
+			return;
+		}
 		clientId = randomClientId();
 		name = '';
 		allow = true;
@@ -101,7 +115,11 @@
 <!-- Клик по подложке форму не теряет: выход — «Отменить» или Esc. -->
 <Modal
 	{open}
-	title={link ? m.proxy_allowlist_modal_link_title() : m.proxy_allowlist_modal_title()}
+	title={link
+		? m.proxy_allowlist_modal_link_title()
+		: reissue
+			? m.proxy_allowlist_issue_title()
+			: m.proxy_allowlist_modal_title()}
 	size="sm"
 	closeOnBackdrop={false}
 	{onclose}
@@ -114,14 +132,16 @@
 	{:else}
 		<div class="add-form">
 			<div class="field-with-btn">
-				<Input label="Client ID" bind:value={clientId} fullWidth />
-				<IconButton
-					size="sm"
-					ariaLabel={m.proxy_allowlist_refresh_id()}
-					onclick={() => (clientId = randomClientId())}
-				>
-					<RefreshCw size={14} />
-				</IconButton>
+				<Input label="Client ID" bind:value={clientId} disabled={!!reissue} fullWidth />
+				{#if !reissue}
+					<IconButton
+						size="sm"
+						ariaLabel={m.proxy_allowlist_refresh_id()}
+						onclick={() => (clientId = randomClientId())}
+					>
+						<RefreshCw size={14} />
+					</IconButton>
+				{/if}
 			</div>
 			<Input label={m.proxy_clients_name_label()} bind:value={name} fullWidth />
 			<p class="link-peer-note">
@@ -157,11 +177,13 @@
 					{confError || m.proxy_allowlist_conf_missing()}
 				</p>
 			{/if}
-			<Toggle
-				label={m.proxy_share_wizard_allow()}
-				checked={allow}
-				onchange={(v) => (allow = v)}
-			/>
+			{#if !reissue}
+				<Toggle
+					label={m.proxy_share_wizard_allow()}
+					checked={allow}
+					onchange={(v) => (allow = v)}
+				/>
+			{/if}
 			{#if !allow}
 				<!-- Ссылку хранит запись списка (#919): без записи её негде показать
 				     потом, и владелец должен знать это ДО отправки, а не после. -->
@@ -178,7 +200,7 @@
 		{:else}
 			<Button variant="secondary" size="md" disabled={busy} onclick={onclose}>{m.proxy_common_cancel_action()}</Button>
 			<Button variant="primary" size="md" disabled={!canSubmit} loading={busy} onclick={submit}>
-				{m.common_add()}
+				{reissue ? m.proxy_allowlist_issue_link() : m.common_add()}
 			</Button>
 		{/if}
 	{/snippet}

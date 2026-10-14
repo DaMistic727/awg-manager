@@ -230,6 +230,41 @@ describe('ServerAllowlist: добавление абонента модалко�
 		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
 	});
 
+	// F371: абонент до #919 без ссылки — «Выдать ссылку» открывает форму с его
+	// Client ID (не меняется) и именем; выдача вносит ту же запись (upsert).
+	it('F371: «Выдать ссылку» у записи без ссылки — тот же Client ID', async () => {
+		apiMock.getFreeTurnServerAllowlist.mockResolvedValue({
+			enabled: true,
+			clientsFile: '/opt/etc/freeturn/clients.json',
+			clients: [{ clientId: 'old-cid', comment: 'Старый' }],
+		});
+		apiMock.generateFreeTurnLink.mockResolvedValue({ link: 'freeturn://new', clientId: 'old-cid' });
+		render(ServerAllowlist, {
+			props: {
+				serverId: 'ft1',
+				serverName: 'Раздача FreeTurn',
+				server: SERVER,
+				locked: async (fn: () => Promise<void>) => {
+					await fn();
+				},
+			},
+		});
+		const row = (await screen.findByText('Старый')).closest('li') as HTMLElement;
+		await fireEvent.click(within(row).getByRole('button', { name: 'Выдать ссылку' }));
+		const modal = await screen.findByRole('dialog');
+		const id = within(modal).getByLabelText<HTMLInputElement>('Client ID');
+		expect(id.value).toBe('old-cid');
+		expect(id.disabled).toBe(true);
+		expect(within(modal).getByLabelText<HTMLInputElement>('Имя абонента').value).toBe('Старый');
+		expect(within(modal).queryByText('Внести в список разрешённых')).toBeNull();
+
+		await fireEvent.click(within(modal).getByRole('button', { name: 'Выдать ссылку' }));
+		await waitFor(() => expect(apiMock.addFreeTurnServerAllowlistClient).toHaveBeenCalled());
+		expect(apiMock.generateFreeTurnLink.mock.calls[0][0]).toMatchObject({ clientId: 'old-cid' });
+		expect(apiMock.addFreeTurnServerAllowlistClient.mock.calls[0][1]).toBe('old-cid');
+		expect(apiMock.addFreeTurnServerAllowlistClient.mock.calls[0][3]).toBe('freeturn://new');
+	});
+
 	it('галка снята — ссылка есть, записи в списке нет', async () => {
 		mount();
 		const modal = await openModal();

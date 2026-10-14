@@ -2513,6 +2513,8 @@
 	"proxy_allowlist_disabled_restart": "Список выключен — перезапустите сервер, чтобы проверка отключилась",
 	"proxy_allowlist_disable": "Выключить список",
 	"proxy_allowlist_link": "Ссылка",
+	"proxy_allowlist_issue_link": "Выдать ссылку",
+	"proxy_allowlist_issue_title": "Ссылка существующему абоненту",
 	"proxy_allowlist_links_unreadable": "Файл выданных ссылок не прочитался: ссылки абонентов не показаны, и добавить абонента со ссылкой нельзя, пока файл не исправят или не удалят (путь — в журнале). Записи можно смотреть и удалять.",
 	"proxy_allowlist_entries": "Записей: {count}",
 	"proxy_allowlist_check_off": "проверка выключена — записи начнут действовать после её включения",
