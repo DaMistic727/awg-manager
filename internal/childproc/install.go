@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/hoaxisr/awg-manager/internal/storage"
 )
 
 // downloadSlack tops up the transfer cap over the expected size so a
@@ -70,7 +72,7 @@ func Install(ctx context.Context, d Downloader, binPath, url, sha256hex string, 
 		return err
 	}
 	// Atomic activation: same directory → same filesystem, rename не рвётся.
-	if err := os.Rename(tmp, binPath); err != nil {
+	if err := storage.CommitFile(tmp, binPath); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

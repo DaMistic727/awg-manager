@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/sys/exec"
 )
 
@@ -293,8 +294,27 @@ func (sc *Scanner) SaveScript(scriptName string, content string) (string, error)
 		content += "\n"
 	}
 
-	if err := os.WriteFile(full, []byte(content), 0755); err != nil {
+	// Атомарно и с fsync: init-скрипт, обрезанный пропаданием питания,
+	// ломает автозапуск службы (F375). Временный файл — скрытый: rc Entware
+	// исполняет /opt/etc/init.d/S*, и «S50x.tmp.*», оставшийся после сбоя,
+	// запустился бы как служба.
+	tmp, err := os.CreateTemp(dir, ".awgm-"+base+".tmp.*")
+	if err != nil {
 		return "", err
+	}
+	_, werr := tmp.WriteString(content)
+	if cerr := tmp.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), 0755)
+	}
+	if werr == nil {
+		werr = storage.CommitFile(tmp.Name(), full)
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+		return "", werr
 	}
 	// Explicit chmod in case umask cleared execution bits
 	_ = os.Chmod(full, 0755)

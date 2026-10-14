@@ -93,6 +93,30 @@ func writeFileSync(path string, data []byte, perm os.FileMode) error {
 	return f.Close()
 }
 
+// CommitFile делает готовый временный файл tmp файлом path: fsync
+// содержимого, rename, fsync каталога — порядок AtomicWritePerm для файлов,
+// которые пишутся потоком (загрузки бинарей, гео-списков, наборов правил).
+// Без синков пропадание питания в окне writeback оставляет под окончательным
+// именем пустой файл (F375). tmp и path — в одной файловой системе.
+func CommitFile(tmp, path string) error {
+	f, err := os.Open(tmp)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(path))
+	return nil
+}
+
 // syncDir fsyncs a directory so a preceding rename survives power loss.
 // Best-effort: some filesystems reject directory fsync.
 func syncDir(dir string) {

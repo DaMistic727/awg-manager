@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
+	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/sys/httpdownload"
 	"github.com/hoaxisr/awg-manager/internal/sys/routerinfo"
 )
@@ -262,7 +263,7 @@ func (i *Installer) Activate(tmpPath string) error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("chmod %s: %w", tmpPath, err)
 	}
-	if err := os.Rename(tmpPath, i.binaryPath); err != nil {
+	if err := storage.CommitFile(tmpPath, i.binaryPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename %s -> %s: %w", tmpPath, i.binaryPath, err)
 	}

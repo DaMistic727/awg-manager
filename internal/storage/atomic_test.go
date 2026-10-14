@@ -122,3 +122,31 @@ func TestAtomicWrite_ReadOnlyDirRefusesAndKeepsOld(t *testing.T) {
 		t.Fatalf("старое содержимое затёрто: %q", b)
 	}
 }
+
+// CommitFile: готовый временный файл становится целевым (F375); временного
+// после — нет, отсутствующий временный — ошибка, цель не тронута.
+func TestCommitFile(t *testing.T) {
+	dir := t.TempDir()
+	tmp, dst := filepath.Join(dir, "bin.tmp"), filepath.Join(dir, "bin")
+	if err := os.WriteFile(dst, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitFile(tmp, dst); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Fatalf("цель = %q", b)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Fatal("временный файл остался")
+	}
+	if err := CommitFile(tmp, dst); err == nil {
+		t.Fatal("отсутствующий временный файл — не ошибка")
+	}
+	if b, _ := os.ReadFile(dst); string(b) != "new" {
+		t.Fatalf("цель тронута отказом: %q", b)
+	}
+}

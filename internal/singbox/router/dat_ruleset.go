@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+
+	"github.com/hoaxisr/awg-manager/internal/storage"
 )
 
 const (
@@ -396,16 +398,16 @@ func compileDatRuleSet(binary, dir, base, jsonPath, srsPath, metaPath string, so
 		_ = os.Remove(tmpOutPath)
 		return fmt.Errorf("marshal dat rule-set metadata: %w", err)
 	}
-	if err := os.Rename(tmpSourcePath, jsonPath); err != nil {
+	if err := storage.CommitFile(tmpSourcePath, jsonPath); err != nil {
 		_ = os.Remove(tmpSourcePath)
 		_ = os.Remove(tmpOutPath)
 		return fmt.Errorf("publish dat source: %w", err)
 	}
-	if err := os.Rename(tmpOutPath, srsPath); err != nil {
+	if err := storage.CommitFile(tmpOutPath, srsPath); err != nil {
 		_ = os.Remove(tmpOutPath)
 		return fmt.Errorf("publish dat binary: %w", err)
 	}
-	if err := os.WriteFile(metaPath, append(metaJSON, '\n'), 0644); err != nil {
+	if err := storage.AtomicWritePerm(metaPath, append(metaJSON, '\n'), 0644); err != nil {
 		return fmt.Errorf("publish dat metadata: %w", err)
 	}
 	return nil

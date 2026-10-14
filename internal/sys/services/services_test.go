@@ -134,3 +134,24 @@ func TestScanner_List_WithSAndK(t *testing.T) {
 		}
 	}
 }
+
+// F375: временный файл записи init-скрипта не похож на скрипт — rc Entware
+// исполняет /opt/etc/init.d/S*, остаток после сбоя запустился бы.
+func TestSaveScript_TempFileIsHidden(t *testing.T) {
+	dir := t.TempDir()
+	sc := &Scanner{InitDir: dir}
+	if _, err := sc.SaveScript("S50test", "#!/bin/sh\nexit 0\n"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || entries[0].Name() != "S50test" {
+		t.Fatalf("в init.d: %v", entries)
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, "S50test")); fi.Mode().Perm() != 0o755 {
+		t.Fatalf("режим %v", fi.Mode().Perm())
+	}
+	// Имя временного файла сканер и rc скриптом не считают.
+	if IsInitScriptName(".awgm-S50test.tmp.123") {
+		t.Fatal("временный файл похож на init-скрипт")
+	}
+}

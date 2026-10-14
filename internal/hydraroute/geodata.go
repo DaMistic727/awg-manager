@@ -1108,7 +1108,7 @@ func downloadFileWithClient(ctx context.Context, client *http.Client, rawURL, de
 		return 0, fmt.Errorf("close temp file: %w", err)
 	}
 
-	if err := os.Rename(tmp, dest); err != nil {
+	if err := storage.CommitFile(tmp, dest); err != nil {
 		os.Remove(tmp)
 		return 0, fmt.Errorf("rename to dest: %w", err)
 	}
