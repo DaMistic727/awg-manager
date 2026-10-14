@@ -414,7 +414,7 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Security		CookieAuth
-//	@Param			body	body		SettingsData	true	"Settings patch — any subset of fields"
+//	@Param			body	body		storage.SettingsPatch	true	"Settings patch — any subset of fields"
 //	@Success		200		{object}	SettingsResponse
 //	@Failure		400		{object}	APIErrorEnvelope
 //	@Failure		500		{object}	APIErrorEnvelope
