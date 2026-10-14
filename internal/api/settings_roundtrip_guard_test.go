@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -67,10 +68,60 @@ func TestSettingsRoundTrip_ResponseBodyPatchedBack_KeepsSecrets(t *testing.T) {
 	}
 
 	if after := storedSettingsJSON(t, store); after != before {
-		t.Errorf("круговорот ответ→PATCH изменил хранимое:\nбыло:  %s\nстало: %s", before, after)
+		// Только разошедшиеся поля: два полных снимка по ~8 КБ глазами не
+		// сравнить (F222).
+		t.Errorf("круговорот ответ→PATCH изменил хранимое:\n%s", strings.Join(jsonDiff(t, before, after), "\n"))
 	}
 	// Отдельно и по именам — чтобы отказ сразу называл ключевой материал.
 	assertSecretsStillStored(t, store)
+}
+
+// jsonDiff — поля, разошедшиеся между двумя JSON-документами, в виде
+// «путь: было A, стало B»; путь — ключи через точку, индексы в скобках.
+func jsonDiff(t *testing.T, a, b string) []string {
+	t.Helper()
+	flat := func(doc string) map[string]string {
+		var v any
+		if err := json.Unmarshal([]byte(doc), &v); err != nil {
+			t.Fatalf("разбор снимка: %v", err)
+		}
+		out := map[string]string{}
+		var walk func(p string, v any)
+		walk = func(p string, v any) {
+			switch x := v.(type) {
+			case map[string]any:
+				for k, e := range x {
+					walk(strings.TrimPrefix(p+"."+k, "."), e)
+				}
+			case []any:
+				for i, e := range x {
+					walk(fmt.Sprintf("%s[%d]", p, i), e)
+				}
+			default:
+				raw, _ := json.Marshal(x)
+				out[p] = string(raw)
+			}
+		}
+		walk("", v)
+		return out
+	}
+	fa, fb := flat(a), flat(b)
+	var diff []string
+	for k, va := range fa {
+		switch vb, ok := fb[k]; {
+		case !ok:
+			diff = append(diff, fmt.Sprintf("%s: было %s, не стало", k, va))
+		case vb != va:
+			diff = append(diff, fmt.Sprintf("%s: было %s, стало %s", k, va, vb))
+		}
+	}
+	for k, vb := range fb {
+		if _, ok := fa[k]; !ok {
+			diff = append(diff, fmt.Sprintf("%s: не было, стало %s", k, vb))
+		}
+	}
+	sort.Strings(diff)
+	return diff
 }
 
 func storedSettingsJSON(t *testing.T, store *storage.SettingsStore) string {
@@ -220,5 +271,19 @@ func (f *settingsTreeFiller) fillStruct(v reflect.Value, path string) {
 	}
 	if filled == 0 {
 		f.t.Fatalf("фикстуре нечего заполнить в %s (%s)", path, typ)
+	}
+}
+
+// F222: отчёт стража называет только разошедшиеся поля.
+func TestJSONDiff_NamesOnlyChangedFields(t *testing.T) {
+	got := jsonDiff(t, `{"a":1,"b":{"c":"x","d":[1,2]},"e":true}`, `{"a":1,"b":{"c":"y","d":[1,3]},"f":0}`)
+	want := []string{
+		`b.c: было "x", стало "y"`,
+		`b.d[1]: было 2, стало 3`,
+		`e: было true, не стало`,
+		`f: не было, стало 0`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("diff:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
