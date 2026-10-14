@@ -962,6 +962,22 @@ func (l *Local) UpdateDNSRoute(ctx context.Context, in mcpsrv.DNSRouteUpdate) (m
 		// description verbatim, so an empty one would erase it.
 		patch.Name = existing.Name
 	}
+	if existing.Backend == "hydraroute" {
+		// The HR path rewrites the whole group and restores nothing from
+		// the stored one: a sparse patch read as an interface group with
+		// no tunnel, no domains and no icon (F632). Start from what is
+		// stored and overlay only what the caller sent.
+		if in.TunnelID != "" && existing.HRRouteMode == "policy" {
+			return mcpsrv.DNSRoute{}, nil, fmt.Errorf(
+				"dns route %q routes through policy %q, not a tunnel — change its target in the web UI", in.RouteID, existing.HRPolicyName)
+		}
+		patch.Backend = existing.Backend
+		patch.HRRouteMode = existing.HRRouteMode
+		patch.HRPolicyName = existing.HRPolicyName
+		patch.Routes = existing.Routes
+		patch.IconURL = existing.IconURL
+		patch.ManualDomains = existing.ManualDomains
+	}
 	var warnings []string
 	if in.ManualDomains != nil {
 		// ManualDomains only: the service recomputes Domains (and Subnets)

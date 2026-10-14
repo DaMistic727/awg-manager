@@ -334,6 +334,42 @@ func TestHRRoundTrip_SystemTargetIsKernelName(t *testing.T) {
 	}
 }
 
+// Группа на несистемном выходе читается с именем ядра и в TunnelID, и в
+// Interface; каталог по имени ядра туннель не находит. Правка без смены цели
+// (MCP шлёт прочитанное обратно) обязана оставить цель как есть (F632).
+func TestHRUpdate_KeepsTargetReadFromFiles(t *testing.T) {
+	svc, hydra := newHRTestSvc(t, &stubResolver{})
+	ctx := context.Background()
+	if _, err := hydra.CreateGroup("opkgtun10", hydraroute.Group{Description: "M", Domains: []string{"m.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	lists, err := svc.List(ctx)
+	if err != nil || len(lists) != 1 {
+		t.Fatalf("List: %v %+v", err, lists)
+	}
+	l := lists[0]
+	l.Name = "M2"
+	if _, err := svc.Update(ctx, l); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	rs, _ := hydra.ListRuleSet()
+	if len(rs.Targets) != 1 || rs.Targets[0].Name != "opkgtun10" || rs.Targets[0].Groups[0].Description != "M2" {
+		t.Fatalf("targets = %+v", rs.Targets)
+	}
+
+	// Чужая строка в той же форме — не прежняя цель: идёт через каталог и
+	// отвергается, файлы не тронуты.
+	lists, _ = svc.List(ctx)
+	l = lists[0]
+	l.Routes = []RouteTarget{{TunnelID: "evil0", Interface: "evil0"}}
+	if _, err := svc.Update(ctx, l); err == nil {
+		t.Fatal("произвольная цель записана мимо каталога")
+	}
+	if rs, _ := hydra.ListRuleSet(); len(rs.Targets) != 1 || rs.Targets[0].Name != "opkgtun10" {
+		t.Fatalf("targets = %+v", rs.Targets)
+	}
+}
+
 func newHRTestSvcWithNDMS(t *testing.T, resolver InterfaceResolver) (*ServiceImpl, *hydraroute.Service, *query.FakeGetter) {
 	t.Helper()
 	dir := t.TempDir()

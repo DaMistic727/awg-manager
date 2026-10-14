@@ -281,8 +281,15 @@ func (s *ServiceImpl) updateHydraRoute(ctx context.Context, id string, list Doma
 	if err != nil {
 		return nil, err
 	}
-	target, err := s.resolveHRTarget(ctx, list)
-	if err != nil {
+	var target string
+	if keepsHRTarget(list, ref.Target) {
+		// Цель группы вернулась в том виде, в каком её отдал List:
+		// hrGroupToDomainList кладёт имя ядра несистемного выхода и в
+		// TunnelID, и в Interface, а каталог знает туннели по id, не по имени
+		// ядра. Принимается ТОЛЬКО прежняя цель этой же группы — произвольную
+		// строку так не записать (F632).
+		target = ref.Target
+	} else if target, err = s.resolveHRTarget(ctx, list); err != nil {
 		return nil, err
 	}
 	g := hrGroupFromList(list)
@@ -312,6 +319,15 @@ func (s *ServiceImpl) updateHydraRoute(ctx context.Context, id string, list Doma
 	}
 	dl.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	return &dl, nil
+}
+
+// keepsHRTarget — интерфейсная правка, вернувшая цель группы без перевода.
+func keepsHRTarget(list DomainList, target string) bool {
+	if list.HRRouteMode == "policy" || len(list.Routes) == 0 {
+		return false
+	}
+	r := list.Routes[0]
+	return r.Interface == target && r.TunnelID == target
 }
 
 // resolveHRTarget turns the user-facing DomainList fields into the opaque

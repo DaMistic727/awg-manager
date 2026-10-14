@@ -2637,6 +2637,60 @@ func TestLocal_UpdateDNSRouteKeepsHRDescription(t *testing.T) {
 	}
 }
 
+// TestLocal_UpdateDNSRouteHRStartsFromStored — HR-путь dnsroute.Update
+// переписывает группу целиком и ничего не берёт из сохранённой: разреженный
+// патч становился интерфейсной группой без туннеля, доменов и иконки (F632).
+func TestLocal_UpdateDNSRouteHRStartsFromStored(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.dns.lists = []dnsroute.DomainList{{
+		ID: "hr:r1:opkgtun10:0", Name: "YouTube", Backend: "hydraroute", IconURL: "https://i/yt.png",
+		ManualDomains: []string{"youtube.com", "10.0.0.0/8"}, HRRouteMode: "interface",
+		Routes: []dnsroute.RouteTarget{{TunnelID: "opkgtun10", Interface: "opkgtun10"}},
+	}}
+
+	if _, _, err := h.l.UpdateDNSRoute(ctx, mcpsrv.DNSRouteUpdate{RouteID: "hr:r1:opkgtun10:0", Name: "YT"}); err != nil {
+		t.Fatal(err)
+	}
+	u := h.dns.updated
+	if u.Name != "YT" || u.HRRouteMode != "interface" || u.IconURL != "https://i/yt.png" ||
+		len(u.ManualDomains) != 2 || len(u.Routes) != 1 || u.Routes[0].Interface != "opkgtun10" {
+		t.Fatalf("sent %+v, want the stored group with only the name changed", u)
+	}
+
+	// Новый туннель перекрывает сохранённую цель, остальное — как было.
+	if _, _, err := h.l.UpdateDNSRoute(ctx, mcpsrv.DNSRouteUpdate{RouteID: "hr:r1:opkgtun10:0", TunnelID: "awg10"}); err != nil {
+		t.Fatal(err)
+	}
+	if u := h.dns.updated; len(u.Routes) != 1 || u.Routes[0].TunnelID != "awg10" || u.Routes[0].Interface != "" || u.IconURL == "" {
+		t.Fatalf("sent %+v", u)
+	}
+}
+
+// У группы с политикой туннеля нет: tunnelId молча перевёл бы её в
+// интерфейсный режим — отказ, запись не тронута (F632).
+func TestLocal_UpdateDNSRouteHRPolicyRefusesTunnel(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.dns.lists = []dnsroute.DomainList{{
+		ID: "hr:r1:Belka:0", Name: "B", Backend: "hydraroute", HRRouteMode: "policy", HRPolicyName: "Belka",
+		ManualDomains: []string{"b.com"},
+	}}
+
+	if _, _, err := h.l.UpdateDNSRoute(ctx, mcpsrv.DNSRouteUpdate{RouteID: "hr:r1:Belka:0", TunnelID: "awg10"}); err == nil {
+		t.Fatal("tunnelId on a policy group must be refused")
+	}
+	if h.dns.updated.ID != "" {
+		t.Fatalf("update sent anyway: %+v", h.dns.updated)
+	}
+	if _, _, err := h.l.UpdateDNSRoute(ctx, mcpsrv.DNSRouteUpdate{RouteID: "hr:r1:Belka:0", Name: "B2"}); err != nil {
+		t.Fatal(err)
+	}
+	if u := h.dns.updated; u.HRRouteMode != "policy" || u.HRPolicyName != "Belka" || len(u.ManualDomains) != 1 {
+		t.Fatalf("sent %+v, want the policy group kept", u)
+	}
+}
+
 // TestLocal_SetDNSRouteEnabledFindsHRGroupByPosition — переключение HR-
 // группы меняет ревизию файлов, а с ней id всех групп. Перечитывать по
 // старому id нельзя: вернулась бы запись до переключения. Ищем по позиции.
