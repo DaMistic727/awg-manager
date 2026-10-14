@@ -490,7 +490,13 @@ func (s *Service) UpdatePeer(ctx context.Context, id, pubkey string, req UpdateP
 		if wantTunnelChange {
 			sv.Peers[i].TunnelIP = req.TunnelIP
 		}
-		sv.Peers[i].Description = req.Description
+		// Имя — только если правка его меняла: без смены имени блокировка не
+		// берётся (M2), и соседнее переименование, записанное после снимка,
+		// иначе затёрлось бы прежним именем из снимка — в записи старое, в
+		// NDMS новое (F530). Меняла — правка шла под блокировкой.
+		if req.Description != peer.Description {
+			sv.Peers[i].Description = req.Description
+		}
 		sv.Peers[i].DNS = req.DNS
 		// Новый слайс, не append по месту: UpdateManagedServer клонирует только
 		// Peers, внутренние слайсы элементов делятся с кэшем.
