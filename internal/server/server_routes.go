@@ -425,7 +425,6 @@ func (s *Server) registerRoutingRoutes(mux *http.ServeMux, h *routeHandlers) {
 	mux.HandleFunc("/api/dns-routes/create-batch", h.guarded(h.dnsRouteHandler.CreateBatch))
 	mux.HandleFunc("/api/dns-routes/set-enabled", h.guarded(h.dnsRouteHandler.SetEnabled))
 	mux.HandleFunc("/api/dns-routes/refresh", h.guarded(h.dnsRouteHandler.Refresh))
-	mux.HandleFunc("/api/dns-routes/bulk-backend", h.guarded(h.dnsRouteHandler.BulkBackend))
 
 	// Static IP routes (protected + boot guarded)
 	h.staticRouteHandler = api.NewStaticRouteHandler(s.staticRouteService, h.appLog)

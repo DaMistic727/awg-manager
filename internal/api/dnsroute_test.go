@@ -285,7 +285,7 @@ func TestDNSRouteHandlerContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("CreateBatchBulkBackendRefresh", func(t *testing.T) {
+	t.Run("CreateBatchRefresh", func(t *testing.T) {
 		fake := &fakeDNSRouteService{}
 		h := NewDNSRouteHandler(fake, nil)
 		if rr := perform(h.CreateBatch, http.MethodGet, "/dns-routes/create-batch", "[]"); rr.Code != http.StatusMethodNotAllowed {
@@ -303,58 +303,6 @@ func TestDNSRouteHandlerContracts(t *testing.T) {
 		}}, nil)
 		if rr := perform(hCBE.CreateBatch, http.MethodPost, "/dns-routes/create-batch", `[{}]`); decodeJSONBody(t, rr)["code"] != "DNS_ROUTE_CREATE_BATCH_ERROR" {
 			t.Fatal(rr.Body.String())
-		}
-
-		if rr := perform(h.BulkBackend, http.MethodGet, "/dns-routes/bulk-backend", ""); rr.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("code=%d", rr.Code)
-		}
-		if rr := perform(h.BulkBackend, http.MethodPost, "/dns-routes/bulk-backend", `{"listIDs":["a"],"backend":"bad"}`); decodeJSONBody(t, rr)["code"] != "INVALID_BACKEND" {
-			t.Fatal(rr.Body.String())
-		}
-		if rr := perform(h.BulkBackend, http.MethodPost, "/dns-routes/bulk-backend", `{"listIDs":[],"backend":"ndms"}`); decodeJSONBody(t, rr)["code"] != "EMPTY_LIST" {
-			t.Fatal(rr.Body.String())
-		}
-		calls := 0
-		hB := NewDNSRouteHandler(&fakeDNSRouteService{
-			getFn: func(_ context.Context, id string) (*dnsroute.DomainList, error) {
-				if id == "bad" {
-					return nil, errors.New("x")
-				}
-				l := sampleDNSList(id, id)
-				return &l, nil
-			},
-			updateFn: func(_ context.Context, l dnsroute.DomainList) (*dnsroute.DomainList, error) {
-				if l.ID == "uerr" {
-					return nil, errors.New("uerr")
-				}
-				if l.Backend == "hydraroute" {
-					calls++
-				}
-				return &l, nil
-			},
-		}, nil)
-		rr = perform(hB.BulkBackend, http.MethodPost, "/dns-routes/bulk-backend", `{"listIDs":["good","bad","uerr"],"backend":"hydraroute"}`)
-		if rr.Code != http.StatusOK || calls == 0 {
-			t.Fatal(rr.Body.String())
-		}
-		hBL := NewDNSRouteHandler(&fakeDNSRouteService{listFn: func(context.Context) ([]dnsroute.DomainList, error) { return nil, errors.New("boom") }}, nil)
-		if rr := perform(hBL.BulkBackend, http.MethodPost, "/dns-routes/bulk-backend", `{"listIDs":["a"],"backend":"ndms"}`); decodeJSONBody(t, rr)["code"] != "DNS_ROUTE_LIST_ERROR" {
-			t.Fatal(rr.Body.String())
-		}
-
-		// Все элементы упали → отказ и ноль публикаций: раньше ручка отвечала 200 со
-		// свежим списком и слала bulk-backend, как будто что-то поменялось.
-		pZero := newBusProbe(t)
-		hZero := NewDNSRouteHandler(&fakeDNSRouteService{
-			getFn: func(context.Context, string) (*dnsroute.DomainList, error) { return nil, errors.New("x") },
-		}, nil)
-		hZero.SetEventBus(pZero.bus())
-		rr = perform(hZero.BulkBackend, http.MethodPost, "/dns-routes/bulk-backend", `{"listIDs":["a","b"],"backend":"hydraroute"}`)
-		if rr.Code != http.StatusBadRequest || decodeJSONBody(t, rr)["code"] != "BULK_BACKEND_FAILED" {
-			t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
-		}
-		if inv := pZero.invalidated(); len(inv) != 0 {
-			t.Fatalf("публикации при нуле переехавших: %v", inv)
 		}
 
 		if rr := perform(h.Refresh, http.MethodGet, "/dns-routes/refresh", ""); rr.Code != http.StatusMethodNotAllowed {
@@ -387,7 +335,7 @@ func TestDNSRouteHandlerContracts(t *testing.T) {
 // Каждая мутирующая ручка DNS-маршрутов на успехе публикует ровно одну
 // инвалидацию dns-routes со своим reason; на отказе службы — ничего.
 // До этого пина шина в api-тестах не читалась ни разу: снятый publish был зелёным.
-// Все Delete/Refresh/BulkBackend — POST (гарды в dnsroute.go:268, :489, :432).
+// Все Delete/Refresh — POST (гарды в dnsroute.go:268, :489, :432).
 func TestDNSRouteHandler_MutationsPublishInvalidation(t *testing.T) {
 	const res = "routing.dnsRoutes"
 	boom := errors.New("boom")
@@ -414,11 +362,6 @@ func TestDNSRouteHandler_MutationsPublishInvalidation(t *testing.T) {
 			&fakeDNSRouteService{setEnabledFn: func(context.Context, string, bool) error { return boom }}},
 		{"Refresh", func(h *DNSRouteHandler) http.HandlerFunc { return h.Refresh }, "POST", "/dns-routes/refresh?id=dns1", "", "refresh-subscriptions",
 			&fakeDNSRouteService{refreshSubscriptionsFn: func(context.Context, string) error { return boom }}},
-		// BulkBackend: отказ отдельного Get/Update по элементу — `continue` (200 +
-		// публикация, пока переехал хотя бы один); ноль переехавших — 400
-		// BULK_BACKEND_FAILED без публикации; отказ List — DNS_ROUTE_LIST_ERROR.
-		{"BulkBackend", func(h *DNSRouteHandler) http.HandlerFunc { return h.BulkBackend }, "POST", "/dns-routes/bulk-backend", `{"listIDs":["dns1"],"backend":"hydraroute"}`, "bulk-backend",
-			&fakeDNSRouteService{listFn: func(context.Context) ([]dnsroute.DomainList, error) { return nil, boom }}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

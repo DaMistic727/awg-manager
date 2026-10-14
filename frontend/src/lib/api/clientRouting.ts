@@ -121,13 +121,6 @@ export class RoutingClient extends ServersClient {
 		return this.request(endpoint, { method: 'POST' });
 	}
 
-	async bulkDnsRouteBackend(listIDs: string[], backend: 'ndms' | 'hydraroute'): Promise<DnsRoute[]> {
-		return this.request('/dns-routes/bulk-backend', {
-			method: 'POST',
-			body: JSON.stringify({ listIDs, backend }),
-		});
-	}
-
 	// #endregion
 
 

@@ -3432,7 +3432,6 @@ export const RESPONSE_SCHEMAS: Record<string, v.GenericSchema> = {
 	"POST /control/toggle-enabled": v.lazy(() => api_APIEnvelope),
 	"POST /diagnostics/run": v.lazy(() => api_APIEnvelope),
 	"POST /dns-check/start": v.lazy(() => api_DnsCheckStartResponseEnvelope),
-	"POST /dns-routes/bulk-backend": v.lazy(() => api_APIEnvelope),
 	"POST /dns-routes/create": v.lazy(() => api_DnsRouteResponse),
 	"POST /dns-routes/create-batch": v.lazy(() => api_APIEnvelope),
 	"POST /dns-routes/delete": v.lazy(() => api_APIEnvelope),

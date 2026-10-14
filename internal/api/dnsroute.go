@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/hoaxisr/awg-manager/internal/dnsroute"
@@ -129,7 +128,7 @@ func (h *DNSRouteHandler) SetEventBus(bus *events.Bus) { h.bus = bus }
 // publishDnsUpdated posts a resource:invalidated hint so clients refetch
 // their DNS route list. The fresh list is also returned inline from every
 // mutation handler (Create/Update return the single entity for its
-// lastDedupeReport; Delete/SetEnabled/DeleteBatch/BulkBackend/Refresh
+// lastDedupeReport; Delete/SetEnabled/DeleteBatch/Refresh
 // return the whole list so the caller can apply it without an extra
 // round-trip). The hint remains as a safety net for tabs subscribed on
 // different pages that did not issue the mutation themselves.
@@ -434,66 +433,6 @@ func (h *DNSRouteHandler) SetEnabled(w http.ResponseWriter, r *http.Request) {
 
 	response.Success(w, list)
 	h.publishDnsUpdated("set-enabled")
-}
-
-// BulkBackend switches the routing backend for multiple lists.
-//
-//	@Summary		Bulk set DNS route backend
-//	@Tags			dns-routes
-//	@Accept			json
-//	@Produce		json
-//	@Security		CookieAuth
-//	@Success		200	{object}	APIEnvelope
-//	@Failure		400	{object}	APIErrorEnvelope
-//	@Failure		500	{object}	APIErrorEnvelope
-//	@Router			/dns-routes/bulk-backend [post]
-func (h *DNSRouteHandler) BulkBackend(w http.ResponseWriter, r *http.Request) {
-	req, ok := parseJSON[struct {
-		ListIDs []string `json:"listIDs"`
-		Backend string   `json:"backend"`
-	}](w, r, http.MethodPost)
-	if !ok {
-		return
-	}
-	if req.Backend != "ndms" && req.Backend != "hydraroute" {
-		response.Error(w, "Invalid backend: must be 'ndms' or 'hydraroute'", "INVALID_BACKEND")
-		return
-	}
-	if len(req.ListIDs) == 0 {
-		response.Error(w, "No list IDs provided", "EMPTY_LIST")
-		return
-	}
-
-	changed := 0
-	for _, id := range req.ListIDs {
-		list, err := h.svc.Get(r.Context(), id)
-		if err != nil {
-			h.log.Warn("bulk-backend", id, "Failed to load list: "+err.Error())
-			continue
-		}
-		list.Backend = req.Backend
-		if _, err := h.svc.Update(r.Context(), *list); err != nil {
-			h.log.Warn("bulk-backend", id, "Failed to update backend: "+err.Error())
-			continue
-		}
-		changed++
-	}
-	if changed == 0 {
-		response.Error(w, "no lists were changed", "BULK_BACKEND_FAILED")
-		return
-	}
-	h.log.Info("bulk-backend", req.Backend, fmt.Sprintf("bulk backend change: %d lists → %s", changed, req.Backend))
-
-	fresh, err := h.svc.List(r.Context())
-	if err != nil {
-		response.Error(w, err.Error(), "DNS_ROUTE_LIST_ERROR")
-		return
-	}
-
-	h.publishDnsUpdated("bulk-backend")
-
-	// Return fresh list so clients can call applyMutationResponse.
-	response.Success(w, fresh)
 }
 
 // Refresh refreshes subscriptions for a single list or all lists.
