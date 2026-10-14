@@ -1965,6 +1965,30 @@ func TestBootBinariesPendingKeepsOldGenerationAlive(t *testing.T) {
 	}
 }
 
+// F304 M2: пока ворота ждали загрузку, демон завершается (ctx отменён) —
+// бут выходит сразу после ворот: ни PostSeed (добивание старого поколения),
+// ни воркеров с мёртвым ctx.
+func TestBootStopsAfterGateWhenCtxCancelled(t *testing.T) {
+	e := newEnv(t)
+	seedState(t, e, rawRec("de", "OpkgTun18", "opkgtun18"))
+	ctx, cancel := context.WithCancel(context.Background())
+	ensure := e.m.deps.EnsureBinaries
+	e.m.deps.EnsureBinaries = func(c context.Context, recs []instancestore.Record, progress func(string)) error {
+		cancel() // SIGTERM пришёл, пока шла загрузка; сами бинари успели
+		return ensure(c, recs, progress)
+	}
+
+	if err := e.m.Boot(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("бут обязан выйти по отменённому ctx: %v", err)
+	}
+	if len(e.postSeed) != 0 || len(e.instances) != 0 {
+		t.Fatalf("после ворот на мёртвом ctx: postSeed=%d inst=%d", len(e.postSeed), len(e.instances))
+	}
+	if info := e.m.SeedInfo(); info.Booted {
+		t.Fatalf("бут отмечен состоявшимся: %+v", info)
+	}
+}
+
 // nil-хук — прежнее поведение (тесты без проводки).
 func TestBootWithoutBinariesHookBootsAsBefore(t *testing.T) {
 	e := newEnv(t)

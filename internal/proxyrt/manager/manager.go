@@ -321,6 +321,14 @@ func (m *Manager) Boot(ctx context.Context) error {
 			progress(err.Error())
 			return err
 		}
+		// Ворота могли ждать загрузку минутами, а за это время демон
+		// завершается (SIGTERM рвёт ctx): дальше — добивание старого
+		// поколения и сборка воркеров, которые с отменённым ctx не спавнят.
+		// Выход здесь, а не короткий разрыв (F304 M2).
+		if err := ctx.Err(); err != nil {
+			progress(err.Error())
+			return err
+		}
 	}
 	// Занятый listen на бооте — не приговор. Посев разводит претендентов на
 	// один порт ТОЛЬКО между записями (resolveListenConflicts), а занятость
