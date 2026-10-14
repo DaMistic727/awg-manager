@@ -279,7 +279,7 @@ func runCleanup(dataDir string) {
 	}
 
 	// Токен RCI — последним: всё выше ходит в RCI с ним.
-	if err := ndmstransport.RevokeToken(); err != nil {
+	if err := ndmstransport.RevokeToken(ndmsinfo.KnownWithoutRCIToken()); err != nil {
 		fmt.Fprintf(os.Stderr, "revoke rci token: %v\n", err)
 	}
 

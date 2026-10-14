@@ -44,6 +44,20 @@ func TestIsAtLeast502(t *testing.T) {
 	}
 }
 
+// Отзыв токена пропускается только на заведомо старой прошивке: неизвестная
+// или неразборная версия — «пробовать» (F639).
+func TestReleaseBefore502(t *testing.T) {
+	for release, want := range map[string]bool{
+		"4.03.C.6.3-9": true, "5.01.C.6.0-1": true, "5.00.A.1.0-0": true,
+		"5.02.A.1.0-0": false, "5.02.02.0-0": false, "6.00.A.1.0-0": false,
+		"": false, "5": false, "5.01": false, "x.01.A.1": false, "5.y.A.1": false,
+	} {
+		if got := releaseBefore502(release); got != want {
+			t.Errorf("releaseBefore502(%q) = %v, want %v", release, got, want)
+		}
+	}
+}
+
 // Порог ASC 3.x — 5.02.A.11 (стенд 5.02.A.11.0-1, 25.09.2026).
 func TestIsAtLeast502A11(t *testing.T) {
 	tests := []struct {

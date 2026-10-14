@@ -300,7 +300,7 @@ func TestToken_Revoke(t *testing.T) {
 	f := &fakeNdmc{}
 	tt, path := newTestTokens(t, f, nil)
 	os.WriteFile(path, []byte(tokA), 0o600)
-	if err := tt.revoke(); err != nil {
+	if err := tt.revoke(false); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(f.cmds, "|"); got != "show authentication token|authentication token delete 2|authentication token delete 4" {
@@ -312,7 +312,7 @@ func TestToken_Revoke(t *testing.T) {
 
 	failing := &tokenTransport{path: path, supported: func() bool { return true }, ndmc: func(string) (string, error) { return "", errors.New("ndm busy") }}
 	os.WriteFile(path, []byte(tokA), 0o600)
-	if err := failing.revoke(); err == nil {
+	if err := failing.revoke(false); err == nil {
 		t.Fatal("ошибка ndmc проглочена")
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -381,7 +381,7 @@ func TestToken_RevokeIsFinal(t *testing.T) {
 	r := &rci{}
 	f := &fakeNdmc{gen: []string{tokA}}
 	tt, _ := newTestTokens(t, f, r)
-	if err := tt.revoke(); err != nil {
+	if err := tt.revoke(false); err != nil {
 		t.Fatal(err)
 	}
 	n := len(f.cmds)
@@ -417,11 +417,28 @@ func TestToken_RevokeIgnoresGate(t *testing.T) {
 	f := &fakeNdmc{}
 	tt, _ := newTestTokens(t, f, nil)
 	tt.supported = func() bool { return false }
-	if err := tt.revoke(); err != nil {
+	if err := tt.revoke(false); err != nil {
 		t.Fatal(err)
 	}
 	if f.count("authentication token delete") != 2 {
 		t.Fatalf("ndmc: %v", f.cmds)
+	}
+}
+
+// Прошивка заведомо до 5.02: ndmc не зовётся вовсе (иначе E «no such
+// command» в журнале роутера), файл снимается, отзыв окончательный (F639).
+func TestToken_RevokeKnownOldFirmwareSkipsNdmc(t *testing.T) {
+	f := &fakeNdmc{}
+	tt, path := newTestTokens(t, f, nil)
+	os.WriteFile(path, []byte(tokA), 0o600)
+	if err := tt.revoke(true); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if len(f.cmds) != 0 {
+		t.Fatalf("ndmc звали: %v", f.cmds)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) || tt.path != "" {
+		t.Fatalf("файл %v, path %q", err, tt.path)
 	}
 }
 
@@ -431,7 +448,7 @@ func TestToken_RevokeToleratesNoCommand(t *testing.T) {
 	f := &fakeNdmc{noop: true}
 	tt, path := newTestTokens(t, f, nil)
 	os.WriteFile(path, []byte(tokA), 0o600)
-	if err := tt.revoke(); err != nil {
+	if err := tt.revoke(false); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) || tt.path != "" {

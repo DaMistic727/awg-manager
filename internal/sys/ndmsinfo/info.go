@@ -191,6 +191,27 @@ func SupportsRCIToken() bool {
 	return isAtLeast502(info.Release)
 }
 
+// KnownWithoutRCIToken — версия прошивки известна, разобрана и старше 5.02:
+// команд токенов на роутере заведомо нет. Неизвестная или неразборная
+// версия сюда не попадает — для отзыва это значит «пробовать» (F639).
+func KnownWithoutRCIToken() bool {
+	info := Get()
+	return info != nil && releaseBefore502(info.Release)
+}
+
+func releaseBefore502(release string) bool {
+	parts := strings.Split(release, ".")
+	if len(parts) < 3 {
+		return false
+	}
+	major, err1 := strconv.Atoi(parts[0])
+	minor, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return major < 5 || (major == 5 && minor < 2)
+}
+
 func isAtLeast502(release string) bool {
 	return releaseAtLeast(release, 2, 0)
 }

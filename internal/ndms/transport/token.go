@@ -68,21 +68,26 @@ func (t *tokenTransport) enabled() bool {
 }
 
 // RevokeToken удаляет токены awg-manager на роутере и файл — для деинсталляции.
-func RevokeToken() error { return tokens.revoke() }
+// noTokenCommand — прошивка заведомо до 5.02 (ndmsinfo.KnownWithoutRCIToken):
+// роутер не трогаем, снимаем только файл.
+func RevokeToken(noTokenCommand bool) error { return tokens.revoke(noTokenCommand) }
 
-func (t *tokenTransport) revoke() error {
+func (t *tokenTransport) revoke(noTokenCommand bool) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	// Гейт по версии здесь не смотрим: при неизвестной версии (все каналы
+	// Гейт supported здесь не смотрим: при неизвестной версии (все каналы
 	// молчат) отказ от отзыва оставил бы на роутере бессрочный admin-токен.
-	// До 5.02 это один вызов ndmc с «no such command».
+	// Пропуск — только когда версия известна и старше 5.02: иначе ndmc с
+	// «no such command» пишет E в журнал роутера на каждое удаление (F639).
 	if t.path == "" {
 		return nil
 	}
 	// Сначала роутер: не снялся — файл остаётся, и следующая установка
 	// найдёт и снимет токен по описанию.
-	if err := t.deleteOurs(""); err != nil && !errors.Is(err, errNoTokenCommand) {
-		return err
+	if !noTokenCommand {
+		if err := t.deleteOurs(""); err != nil && !errors.Is(err, errNoTokenCommand) {
+			return err
+		}
 	}
 	if err := os.Remove(t.path); err != nil && !os.IsNotExist(err) {
 		return err
