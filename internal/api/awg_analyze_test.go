@@ -381,10 +381,10 @@ func TestAwgAnalyzeHandler_MethodNotAllowed(t *testing.T) {
 }
 
 // Анализатор открывается на вкладке уже заведённого туннеля: туннель с
-// адресом подписки Amnezia Premium (заведён до снятия поддержки) обязан
-// анализироваться, а не получать отказ импорта.
-func TestAnalyzeAwgConf_PremiumAddressStillAnalyzed(t *testing.T) {
-	conf := strings.Replace(confPlainWG, "10.8.0.2/32", "100.102.228.17/32", 1)
+// ключом подписки Amnezia Premium в заголовке (заведён до снятия поддержки)
+// обязан анализироваться, а не получать отказ импорта.
+func TestAnalyzeAwgConf_PremiumHeaderStillAnalyzed(t *testing.T) {
+	conf := "# VPN Key: vpn://AAAA\n" + confPlainWG
 	if _, err := analyzeAwgConf(conf, nil, ""); err != nil {
 		t.Fatalf("analyzeAwgConf: %v", err)
 	}

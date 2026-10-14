@@ -912,7 +912,7 @@ func newLifecycle(t *testing.T, state tunnel.State) (*Local, *lifecycleTunnels, 
 // работающий туннель остался бы выключенным.
 func TestLocal_ReplaceTunnelConfigAmneziaPremiumRefusedBeforeStop(t *testing.T) {
 	l, ft, _ := newLifecycle(t, tunnel.StateRunning)
-	_, err := l.ReplaceTunnelConfig(context.Background(), "tn-1", "[Interface]\nAddress = 100.102.228.17/32\n", "")
+	_, err := l.ReplaceTunnelConfig(context.Background(), "tn-1", "# VPN Key: vpn://AAAA\n[Interface]\nAddress = 10.0.0.2/32\n", "")
 	if !errors.Is(err, config.ErrAmneziaPremium) {
 		t.Fatalf("err = %v, want ErrAmneziaPremium", err)
 	}

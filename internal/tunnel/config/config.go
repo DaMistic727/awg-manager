@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/netip"
 	"strconv"
 	"strings"
 
@@ -32,53 +31,18 @@ var (
 	ErrAmneziaPremium = errors.New("Ключи и конфигурации подписки Amnezia Premium не поддерживаются - используйте способы настройки предложенные сервисом")
 )
 
-// amneziaPremiumNet — подсеть адресов интерфейса, которые выдаёт подписка
-// Amnezia Premium (сведения владельца, 13.10.2026).
-var amneziaPremiumNet = netip.MustParsePrefix("100.102.228.0/24")
-
 // RejectAmneziaPremium отвергает конфигурацию, выданную подпиской Amnezia
-// Premium. Признаков два:
-//   - ссылка vpn:// в тексте: портал пишет в заголовок .conf ключ подписки
-//     («# VPN Key: vpn://…»), а в обычном .conf WireGuard/AWG её не бывает;
-//     ключ, вставленный вместо .conf, ловится тем же признаком;
-//   - Address интерфейса из amneziaPremiumNet (IsAmneziaPremiumAddress) —
-//     переживает стёртый заголовок и опознаёт конфигурации из приложения.
+// Premium. Признак — ссылка vpn:// в тексте: портал пишет в заголовок .conf
+// ключ подписки («# VPN Key: vpn://…»), а в обычном .conf WireGuard/AWG её не
+// бывает; ключ, вставленный вместо .conf, ловится тем же признаком.
 //
 // Читает сырой текст: правило одно для config.Parse и для импорта sing-box
 // AWG endpoint из .conf, у которого свой парсер.
-//
-// ponytail: подсеть лежит в CGNAT 100.64.0.0/10 — туда же раздают адреса
-// Tailscale/Headscale, чужой туннель с адресом из этой /24 тоже будет отвергнут.
 func RejectAmneziaPremium(content string) error {
 	if strings.Contains(strings.ToLower(content), "vpn://") {
 		return ErrAmneziaPremium
 	}
-	for _, line := range strings.Split(content, "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "Address") {
-			continue
-		}
-		value, _, _ = strings.Cut(value, "#") // комментарий в конце строки
-		for _, a := range strings.Split(value, ",") {
-			if IsAmneziaPremiumAddress(a) {
-				return ErrAmneziaPremium
-			}
-		}
-	}
 	return nil
-}
-
-// IsAmneziaPremiumAddress — адрес (с маской или без) из подсети подписки
-// Amnezia Premium. IPv4-mapped IPv6 (::ffff:100.102.228.x) — тот же адрес.
-func IsAmneziaPremiumAddress(a string) bool {
-	a = strings.TrimSpace(a)
-	if p, err := netip.ParsePrefix(a); err == nil {
-		return amneziaPremiumNet.Contains(p.Addr().Unmap())
-	}
-	if ip, err := netip.ParseAddr(a); err == nil {
-		return amneziaPremiumNet.Contains(ip.Unmap())
-	}
-	return false
 }
 
 // DefaultAllowedIPs returns the default AllowedIPs for full tunnel routing.

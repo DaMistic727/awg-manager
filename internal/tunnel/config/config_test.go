@@ -1281,17 +1281,14 @@ func TestClassifyAWGVersion_AWG31Flags(t *testing.T) {
 	}
 }
 
-// Конфигурация Amnezia Premium отвергается по ключу подписки в заголовке и
-// по адресу интерфейса из подсети подписки. Обычный .conf проходит.
+// Конфигурация Amnezia Premium отвергается по ключу подписки в заголовке.
+// Обычный .conf проходит — в том числе с адресом из подсети подписки:
+// признак только vpn://, адрес не проверяется (решение владельца 14.10.2026).
 func TestParse_RejectsAmneziaPremium(t *testing.T) {
 	const conf = "[Interface]\nPrivateKey = K==\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = P==\nEndpoint = 192.0.2.1:51820\n"
 	for name, in := range map[string]string{
-		"заголовок портала":    "# Generated on: 2026-09-11\n# VPN Key: vpn://AAAA\n# Keenetic: interface Wireguard0\n" + conf,
-		"ключ вместо .conf":    "VPN://AAAA",
-		"адрес подписки":       strings.Replace(conf, "10.0.0.2/32", "fd00::2/128, 100.102.228.17/32", 1),
-		"адрес без маски":      strings.Replace(conf, "Address = 10.0.0.2/32", "address=100.102.228.17", 1),
-		"комментарий в строке": strings.Replace(conf, "10.0.0.2/32", "100.102.228.17/32 # x", 1),
-		"IPv4-mapped IPv6":     strings.Replace(conf, "10.0.0.2/32", "::ffff:100.102.228.17/128", 1),
+		"заголовок портала": "# Generated on: 2026-09-11\n# VPN Key: vpn://AAAA\n# Keenetic: interface Wireguard0\n" + conf,
+		"ключ вместо .conf": "VPN://AAAA",
 	} {
 		if _, err := Parse(in); !errors.Is(err, ErrAmneziaPremium) {
 			t.Errorf("%s: err = %v, want ErrAmneziaPremium", name, err)
@@ -1299,8 +1296,7 @@ func TestParse_RejectsAmneziaPremium(t *testing.T) {
 	}
 	for _, ok := range []string{
 		"# мой сервер\n" + conf,
-		// Соседи по CGNAT-диапазону проходят: отвергается ровно /24 подписки.
-		strings.Replace(conf, "10.0.0.2/32", "100.102.229.17/32", 1),
+		strings.Replace(conf, "10.0.0.2/32", "100.102.228.17/32", 1),
 	} {
 		if _, err := Parse(ok); err != nil {
 			t.Fatalf("обычный .conf отвергнут: %v", err)
@@ -1308,10 +1304,10 @@ func TestParse_RejectsAmneziaPremium(t *testing.T) {
 	}
 }
 
-// ParseUnchecked читает конфигурацию уже заведённого туннеля: адрес подписки
-// не повод отказать (туннели до снятия Amnezia Premium не трогаем).
-func TestParseUnchecked_AcceptsPremiumAddress(t *testing.T) {
-	conf := "[Interface]\nPrivateKey = K==\nAddress = 100.102.228.17/32\n[Peer]\nPublicKey = P==\nEndpoint = 192.0.2.1:51820\n"
+// ParseUnchecked читает конфигурацию уже заведённого туннеля: ключ подписки
+// в заголовке не повод отказать (туннели до снятия Amnezia Premium не трогаем).
+func TestParseUnchecked_AcceptsPremiumHeader(t *testing.T) {
+	conf := "# VPN Key: vpn://AAAA\n[Interface]\nPrivateKey = K==\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = P==\nEndpoint = 192.0.2.1:51820\n"
 	if _, err := ParseUnchecked(conf); err != nil {
 		t.Fatalf("ParseUnchecked: %v", err)
 	}

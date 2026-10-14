@@ -13,9 +13,9 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/tunnel/config"
 )
 
-// premiumAddrConf — конфигурация подписки без заголовка портала: опознаётся
-// по адресу интерфейса.
-const premiumAddrConf = "[Interface]\nPrivateKey = K==\nAddress = 100.102.228.17/32\n[Peer]\nPublicKey = P==\nEndpoint = 192.0.2.1:51820\n"
+// premiumConf — конфигурация подписки с заголовком портала: опознаётся по
+// ключу vpn://.
+const premiumConf = "# VPN Key: vpn://AAAA\n[Interface]\nPrivateKey = K==\nAddress = 10.0.0.2/32\n[Peer]\nPublicKey = P==\nEndpoint = 192.0.2.1:51820\n"
 
 // Пользователь видит текст отказа дословно — без префикса «parse conf:».
 func wantPremiumRefusal(t *testing.T, rec *httptest.ResponseRecorder) {
@@ -35,7 +35,7 @@ func wantPremiumRefusal(t *testing.T, rec *httptest.ResponseRecorder) {
 func TestImportConf_AmneziaPremiumRefused(t *testing.T) {
 	svc := &importStubSvc{}
 	h := NewImportHandler(svc, storage.NewAWGTunnelStore(t.TempDir()), &appLogSpy{})
-	body, _ := json.Marshal(map[string]string{"content": premiumAddrConf, "name": "p"})
+	body, _ := json.Marshal(map[string]string{"content": premiumConf, "name": "p"})
 	rec := httptest.NewRecorder()
 	h.ImportConf(rec, httptest.NewRequest(http.MethodPost, "/api/import/conf", bytes.NewReader(body)))
 
@@ -56,7 +56,7 @@ func TestTunnelReplaceConf_AmneziaPremiumRefusedBeforeStop(t *testing.T) {
 	if err := store.Create(&storage.AWGTunnel{ID: "awg11", Name: "NL"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	body, _ := json.Marshal(map[string]string{"content": "# VPN Key: vpn://AAAA\n" + premiumAddrConf})
+	body, _ := json.Marshal(map[string]string{"content": premiumConf})
 	rec := httptest.NewRecorder()
 	h.ReplaceConf(rec, httptest.NewRequest(http.MethodPost, "/tunnels/replace?id=awg11", bytes.NewReader(body)))
 

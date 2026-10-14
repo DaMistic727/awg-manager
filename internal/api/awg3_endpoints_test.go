@@ -212,30 +212,6 @@ func TestHandleImport_ConfAmneziaPremiumRejected(t *testing.T) {
 	}
 }
 
-// JSON-форма endpoint'а идёт мимо разбора .conf: адрес подписки ловится по
-// полю address — и списком, и одной строкой.
-func TestAwg3Handler_ImportJSONAmneziaPremiumAddressRejected(t *testing.T) {
-	for name, addr := range map[string]string{
-		"список": `["fd00::2/128", "100.102.228.17/32"]`,
-		"строка": `"100.102.228.17/32"`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			h, store, _, _ := newAwg3TestHandler(t)
-			endpoint := strings.Replace(validEndpoint, `"type": "awg",`, `"type": "awg", "address": `+addr+`,`, 1)
-			req := httptest.NewRequest(http.MethodPost, "/api/awg3-endpoints",
-				strings.NewReader(`{"tag":"p","config":`+endpoint+`}`))
-			rec := httptest.NewRecorder()
-			h.Handle(rec, req)
-			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Amnezia Premium") {
-				t.Fatalf("код %d, тело: %s", rec.Code, rec.Body.String())
-			}
-			if recs, _ := store.List(); len(recs) != 0 {
-				t.Fatalf("запись заведена: %+v", recs)
-			}
-		})
-	}
-}
-
 func TestAwg3Handler_ImportBadSchema(t *testing.T) {
 	h, store, svc, _ := newAwg3TestHandler(t)
 

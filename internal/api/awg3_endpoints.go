@@ -209,13 +209,6 @@ func (h *Awg3Handler) handleImport(w http.ResponseWriter, r *http.Request) {
 		response.BadRequest(w, err.Error())
 		return
 	}
-	// JSON-форма идёт мимо RejectAmneziaPremium выше: адрес проверяется здесь.
-	for _, a := range awg3EndpointAddresses(rec.Endpoint) {
-		if config.IsAmneziaPremiumAddress(a) {
-			response.BadRequest(w, config.ErrAmneziaPremium.Error())
-			return
-		}
-	}
 	rec.ID = newAwg3ID()
 	if err := h.store.Add(rec); err != nil {
 		response.InternalError(w, err.Error())
@@ -464,24 +457,4 @@ func newAwg3ID() string {
 		b[i] = alphabet[int(b[i])%len(alphabet)]
 	}
 	return "awg3-" + string(b)
-}
-
-// awg3EndpointAddresses — поле address awg-endpoint'а sing-box: список
-// префиксов или одна строка (listable).
-func awg3EndpointAddresses(endpoint json.RawMessage) []string {
-	var v struct {
-		Address json.RawMessage `json:"address"`
-	}
-	if json.Unmarshal(endpoint, &v) != nil {
-		return nil
-	}
-	var list []string
-	if json.Unmarshal(v.Address, &list) == nil {
-		return list
-	}
-	var one string
-	if json.Unmarshal(v.Address, &one) == nil {
-		return []string{one}
-	}
-	return nil
 }
