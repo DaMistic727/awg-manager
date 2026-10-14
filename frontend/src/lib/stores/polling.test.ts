@@ -102,6 +102,33 @@ describe('createPollingStore', () => {
         u();
     });
 
+    // F663: событие во время идущего запроса — ещё один запрос после него:
+    // идущий стартовал до записи и несёт прежнее состояние. Несколько
+    // событий за полёт дают ровно один повтор.
+    it('invalidate() during an in-flight fetch refetches once after it', async () => {
+        let resolveFirst!: (v: { v: number }) => void;
+        const fetcher = vi
+            .fn()
+            .mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)))
+            .mockResolvedValue({ v: 2 });
+        const s = createPollingStore<{ v: number }>(fetcher, { staleTime: 10_000, pollInterval: 0 });
+
+        const u = s.subscribe(() => {});
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        s.invalidate();
+        s.invalidate();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+
+        resolveFirst({ v: 1 });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetcher).toHaveBeenCalledTimes(2);
+        expect(s.peek().data).toEqual({ v: 2 });
+
+        u();
+    });
+
     it('applyMutationResponse updates value without fetch', async () => {
         const fetcher = vi.fn().mockResolvedValue({ v: 1 });
         const s = createPollingStore<{ v: number }>(fetcher, { staleTime: 10_000, pollInterval: 10_000 });

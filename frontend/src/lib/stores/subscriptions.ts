@@ -4,12 +4,12 @@ import { registerStore } from './storeRegistry';
 import type { Subscription, SubscriptionGroup } from '$lib/types';
 
 // Подписки обновляет событие: бэкенд публикует singbox.subscriptions на
-// каждую запись стора — REST, MCP и фоновое обновление (MC9). Таймер
-// оставлен страховкой: invalidate во время идущего запроса теряется (F663),
-// а обновление подписки пишет стор несколько раз подряд.
+// каждую запись стора — REST, MCP и фоновое обновление — и на тумблер NDMS
+// Proxy (MC9). Серия записей одного обновления не теряется: invalidate во
+// время запроса даёт повтор после него (F663).
 export const subscriptionsStore = createPollingStore<Subscription[]>(
 	() => api.listSubscriptions(),
-	{ staleTime: 5_000, pollInterval: 30_000 },
+	{ staleTime: 5_000, pollInterval: 0 },
 );
 registerStore('singbox.subscriptions', subscriptionsStore);
 

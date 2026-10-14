@@ -75,6 +75,10 @@ export function createPollingStore<T>(
     let subCount = 0;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let inflight: Promise<void> | null = null;
+    // invalidate во время идущего запроса: тот стартовал ДО записи, о которой
+    // сообщает событие, и может принести прежнее состояние. Флаг даёт ровно
+    // один повторный запрос после него (F663).
+    let refetchAfterInflight = false;
 
     async function doFetch(): Promise<void> {
         if (inflight) return inflight;
@@ -112,6 +116,10 @@ export function createPollingStore<T>(
                 });
             } finally {
                 inflight = null;
+                if (refetchAfterInflight) {
+                    refetchAfterInflight = false;
+                    void doFetch();
+                }
             }
         })();
         return inflight;
@@ -181,6 +189,10 @@ export function createPollingStore<T>(
         },
         invalidate() {
             if (subCount > 0) {
+                if (inflight) {
+                    refetchAfterInflight = true;
+                    return;
+                }
                 void doFetch();
             } else {
                 state.update(s => {
