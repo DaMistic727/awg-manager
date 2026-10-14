@@ -8,7 +8,7 @@
 	interface Props {
 		open: boolean;
 		onclose: () => void;
-		onCreated: (serverId: string) => void;
+		onCreated: (serverId?: string) => void;
 		existingListenPorts?: number[];
 	}
 
@@ -150,6 +150,15 @@
 			onclose();
 			onCreated(created.interfaceName);
 		} catch (e) {
+			// Сервер создан и уже пришёл по SSE, не сверен только ASC: закрыть
+			// как созданный и предупредить — повтор упёрся бы в занятый
+			// адрес/порт (F594).
+			if ((e as { body?: { code?: string } }).body?.code === 'ASC_UNVERIFIED') {
+				notifications.warning(e instanceof Error ? e.message : m.servers_create_failed());
+				onclose();
+				onCreated();
+				return;
+			}
 			notifications.error(e instanceof Error ? e.message : m.servers_create_failed());
 		} finally {
 			creating = false;
