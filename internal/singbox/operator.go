@@ -188,7 +188,7 @@ type Operator struct {
 	// orch is the config.d orchestrator. When non-nil, ApplyConfig
 	// writes 10-tunnels.json through the orchestrator's slot writer
 	// (which handles validate + debounced reload). Wired post-construction
-	// via SetOrch — orchestrator construction needs Operator.Process()
+	// via SetOrch — orchestrator construction needs Operator.OrchestratorProcess()
 	// so we can't pass it through OperatorDeps without a cycle.
 	orch *orchestrator.Orchestrator
 
@@ -462,6 +462,26 @@ func NewOperator(d OperatorDeps) *Operator {
 // drive lifecycle (Start / Stop / Reload / IsRunning). The Process
 // type satisfies orchestrator.ProcessController by structural match.
 func (o *Operator) Process() *Process { return o.proc }
+
+// OrchestratorProcess — процесс для оркестратора: его холодный старт
+// (Reload → Start) проходит тот же дешёвый preflight, что startAndWait.
+// validateLocked оркестратора сверяет только теги и ссылки между слотами —
+// протокол вне сборки бинаря и legacy-стек tun он не видит (F397).
+func (o *Operator) OrchestratorProcess() orchestrator.ProcessController {
+	return preflightedProcess{Process: o.proc, preflight: o.preflightStatic}
+}
+
+type preflightedProcess struct {
+	*Process
+	preflight func() error
+}
+
+func (p preflightedProcess) Start() error {
+	if err := p.preflight(); err != nil {
+		return err
+	}
+	return p.Process.Start()
+}
 
 // SetOrch wires the config.d orchestrator after construction. ApplyConfig
 // uses it (when non-nil) to write 10-tunnels.json through the slot

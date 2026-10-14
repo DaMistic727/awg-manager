@@ -69,11 +69,18 @@ func liveEngines(gens []*processGen) int {
 	return n
 }
 
-// startAndWaitOperator — Operator ровно для startAndWait: конфига нет, поэтому
-// configDeclaresClashAPI консервативно включает гейт готовности, а Clash на
-// закрытом порту готовым не станет никогда.
+// startAndWaitOperator — Operator ровно для startAndWait: конфиг объявляет
+// clash_api, поэтому гейт готовности включён, а Clash на закрытом порту
+// готовым не станет никогда. Каталог конфига нужен preflight'у (F397).
 func startAndWaitOperator(t *testing.T, p *Process) *Operator {
 	t.Helper()
+	if err := os.MkdirAll(p.configPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(p.configPath, "00-base.json"),
+		[]byte(`{"experimental":{"clash_api":{"external_controller":"127.0.0.1:1"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	prev := maxSingboxBootWait
 	maxSingboxBootWait = 300 * time.Millisecond
 	t.Cleanup(func() { maxSingboxBootWait = prev })
@@ -309,5 +316,53 @@ func TestProcess_StopDoesNotMarkZombieDeliberate(t *testing.T) {
 	_ = p.Stop() // ребёнок «не пожат» до конца — ошибка ожидаема
 	if gen.deliberate.Load() {
 		t.Fatal("Stop marked an already-dead (zombie) child as a deliberate exit")
+	}
+}
+
+// F397: startAndWait (холодный старт, watchdog, ручной старт) проходит
+// дешёвый preflight — конфиг с коллизией тегов до exec не доезжает, а
+// ошибка называет оба файла.
+func TestStartAndWait_StaticPreflightBlocksSpawn(t *testing.T) {
+	p, gens := newStubEngine(t)
+	t.Cleanup(p.Close)
+	o := startAndWaitOperator(t, p)
+	for _, f := range []string{"01-a.json", "10-tunnels.json"} {
+		if err := os.WriteFile(filepath.Join(o.configPath, f),
+			[]byte(`{"outbounds":[{"type":"direct","tag":"direct"}]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := o.startAndWait(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "10-tunnels.json") {
+		t.Fatalf("startAndWait = %v, want ошибку коллизии с именами файлов", err)
+	}
+	noteGen(p, gens)
+	if len(*gens) != 0 {
+		t.Fatalf("движок запущен при коллизии: %d поколений", len(*gens))
+	}
+}
+
+// F397: холодный старт оркестратора (Reload → Start) идёт через тот же
+// дешёвый preflight — его validateLocked коллизию между файлами по имени
+// файла не назовёт и протокол вне сборки не увидит.
+func TestOrchestratorProcess_StaticPreflightBlocksSpawn(t *testing.T) {
+	p, gens := newStubEngine(t)
+	t.Cleanup(p.Close)
+	o := startAndWaitOperator(t, p)
+	for _, f := range []string{"01-a.json", "10-tunnels.json"} {
+		if err := os.WriteFile(filepath.Join(o.configPath, f),
+			[]byte(`{"outbounds":[{"type":"direct","tag":"direct"}]}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := o.OrchestratorProcess().Start()
+	if err == nil || !strings.Contains(err.Error(), "10-tunnels.json") {
+		t.Fatalf("Start = %v, want ошибку коллизии с именами файлов", err)
+	}
+	noteGen(p, gens)
+	if len(*gens) != 0 {
+		t.Fatalf("движок запущен при коллизии: %d поколений", len(*gens))
 	}
 }

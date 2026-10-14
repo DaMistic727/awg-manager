@@ -101,7 +101,7 @@ func buildSingboxCore(d singboxCoreDeps) singboxCore {
 	if err != nil {
 		d.bootLog.Warn("dns-matchsource-migration", "", err.Error())
 	}
-	orch := singboxorch.New(singboxConfigDir, op.Process())
+	orch := singboxorch.New(singboxConfigDir, op.OrchestratorProcess())
 	orch.SetLogger(func(level, msg string) {
 		switch level {
 		case "warn":

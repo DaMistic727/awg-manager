@@ -851,7 +851,9 @@ func (o *Operator) startAndWait(ctx context.Context) (spawned bool, err error) {
 	if o.runtimeLogger != nil {
 		o.runtimeLogger.Info("start-and-wait", "", "starting sing-box process")
 	}
-	spawned, err = o.proc.StartSpawned()
+	if err = o.preflightStatic(); err == nil {
+		spawned, err = o.proc.StartSpawned()
+	}
 	if err != nil {
 		safeErr := sanitizeSingboxLogText(err.Error())
 		o.setLastError(safeErr)

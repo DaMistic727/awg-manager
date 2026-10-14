@@ -1484,6 +1484,18 @@ func (o *Operator) mutateBase(mutate func(map[string]any) bool) error {
 // `sing-box check` for everything our merge doesn't cover (parse
 // errors, schema violations, unknown option keys, etc.).
 func (o *Operator) preflightConfigDir() error {
+	if err := o.preflightStatic(); err != nil {
+		return err
+	}
+	return o.validator.Validate(o.configPath)
+}
+
+// preflightStatic — дешёвая часть preflightConfigDir: чтение файлов, без
+// запуска бинаря. Её зовёт и startAndWait (холодный старт, watchdog, ручной
+// старт/рестарт): там `sing-box check` на каждом цикле стоил бы секунды на
+// mipsel, а без этой части конфиг с коллизией тегов или протоколом вне
+// сборки доезжал до exec и падал FATAL'ом самого движка (F397).
+func (o *Operator) preflightStatic() error {
 	// Слот мог приехать мимо пролога — из восстановленного бэкапа или правки
 	// руками уже после старта демона. Шаг идемпотентен и на чистом config.d
 	// ничего не пишет (F396). NB: с этой строкой preflight перестал быть
@@ -1495,10 +1507,7 @@ func (o *Operator) preflightConfigDir() error {
 	if _, err := configmerge.MergeDir(o.configPath); err != nil {
 		return err
 	}
-	if err := o.checkOutboundFeatures(); err != nil {
-		return err
-	}
-	return o.validator.Validate(o.configPath)
+	return o.checkOutboundFeatures()
 }
 
 // checkOutboundFeatures scans every config.d JSON fragment for outbounds
