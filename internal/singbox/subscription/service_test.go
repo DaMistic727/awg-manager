@@ -48,6 +48,7 @@ type fakeMutator struct {
 	ensuredProxies   []ensuredProxyCall
 	removedProxies   []int
 	selectedSelector []string          // "selectorTag→memberTag" pairs recorded by SelectClashProxy
+	persistedDefault []string          // "selectorTag→memberTag" pairs recorded by PersistSelectorDefault
 	clashActiveByTag map[string]string // selectorTag → live active member
 	declaredTags     []string          // DeclaredOutboundTags result; nil = no-op (no pruning)
 	bodies           map[string][]byte // tag → последний JSON из AddOutbound/UpdateOutbound
@@ -199,6 +200,10 @@ func (f *fakeMutator) Reload(ctx context.Context) error {
 }
 func (f *fakeMutator) Rollback()                      { f.rollbacks++ }
 func (f *fakeMutator) DeclaredOutboundTags() []string { return f.declaredTags }
+func (f *fakeMutator) PersistSelectorDefault(selectorTag, memberTag string) error {
+	f.persistedDefault = append(f.persistedDefault, selectorTag+"→"+memberTag)
+	return nil
+}
 func (f *fakeMutator) SelectClashProxy(selectorTag, memberTag string) error {
 	f.selectedSelector = append(f.selectedSelector, selectorTag+"→"+memberTag)
 	return nil
@@ -724,10 +729,12 @@ func TestService_SetActiveMember_UsesClashAPI(t *testing.T) {
 		t.Errorf("clash select args wrong: got %q want %q", mutator.selectedSelector[0], expected)
 	}
 
-	// Switching the active member is runtime-only: no selector Remove/Add, so
-	// no open batch and no SIGHUP. The slot's selector.default is rebuilt as
-	// first-member on every refresh anyway, so persisting it here is pointless;
-	// the choice lives in store.ActiveMember + the live Clash selector.
+	// Switching the active member never opens a batch: no selector
+	// Remove/Add, so no SIGHUP. The slot file still gets the new default
+	// (no reload) — a sing-box restart must start from it (F427).
+	if len(mutator.persistedDefault) != 1 || mutator.persistedDefault[0] != expected {
+		t.Errorf("slot default not persisted: %v, want [%s]", mutator.persistedDefault, expected)
+	}
 	if len(mutator.addedOutbounds) != addedAfterCreate {
 		t.Errorf("SetActiveMember must not add outbounds, got %d new", len(mutator.addedOutbounds)-addedAfterCreate)
 	}

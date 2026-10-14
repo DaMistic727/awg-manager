@@ -46,6 +46,9 @@ type ConfigMutator interface {
 	// single validate+save+reload (#331). Mutations (Add*/Remove*/Update*)
 	// only accumulate in memory; nothing reaches sing-box until Reload.
 	Reload(ctx context.Context) error
+	// PersistSelectorDefault пишет default селектора в файл слота без
+	// проверки и reload — для старта движка после смены сервера (F427).
+	PersistSelectorDefault(selectorTag, memberTag string) error
 	// Rollback discards an uncommitted batch (mutations since the last
 	// commit), restoring the last committed config. Used on a failed Create
 	// so a partial materialisation can't linger in the in-memory slot.
@@ -1295,9 +1298,9 @@ func (s *Service) stageGroupRebuild(sub *Subscription) error {
 var ErrActiveMemberOnURLTest = errors.New("subscription: SetActiveMember not supported in urltest mode")
 
 // SetActiveMember updates the selector's "default" pointer to memberTag.
-// It persists the active member in the store, then hits the Clash API for an
-// instant runtime switch — no SIGHUP, no connection drop. The config slot is
-// deliberately left alone (see the comment at the store write below).
+// It persists the active member in the store and in the slot file (no
+// reload), then hits the Clash API for an instant runtime switch — no SIGHUP,
+// no connection drop.
 func (s *Service) SetActiveMember(ctx context.Context, id, memberTag string) error {
 	s.logInfo("subscription-active-member", id, "set requested: "+memberTag)
 	mu := s.lockSub(id)
@@ -1323,13 +1326,16 @@ func (s *Service) SetActiveMember(ctx context.Context, id, memberTag string) err
 	}
 
 	// Persist the choice in the store — the source of truth for the active
-	// member. The config slot is deliberately NOT rewritten: refresh rebuilds
-	// selector.default from the stored active member (F424), and a slot write
-	// without Reload would only leave an uncommitted batch open in the
-	// adapter. Trade-off: until the next refresh/rebuild the slot still holds
-	// the previous default, so a sing-box restart starts from it.
+	// member; refresh rebuilds selector.default from it (F424).
 	if err := s.store.SetActiveMember(id, memberTag); err != nil {
 		return err
+	}
+	// И в файл слота — без проверки и reload: иначе рестарт sing-box или ребут
+	// до ближайшего refresh поднимал подписку на прежнем сервере, хотя UI
+	// показывает новый (F427). Отказ записи не фатален: store уже держит выбор,
+	// refresh его применит.
+	if err := s.mutator.PersistSelectorDefault(sub.SelectorTag, memberTag); err != nil {
+		s.logWarn("subscription-active-member", id, "persist selector default failed: "+err.Error())
 	}
 
 	// Switch the live selector via the Clash API — instant, no SIGHUP, no

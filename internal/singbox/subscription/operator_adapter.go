@@ -476,6 +476,93 @@ func (a *OperatorAdapter) Reload(_ context.Context) error {
 	return err
 }
 
+// PersistSelectorDefault пишет memberTag в default селектора selectorTag в
+// файле слота — без sing-box check и без reload (F427). Живой селектор
+// переключает Clash API, а файл нужен следующему старту движка: иначе рестарт
+// или ребут поднимает подписку на прежнем сервере, хотя UI показывает новый.
+// sing-box check не нужен: default ставится только на член, который уже есть
+// в outbounds этого селектора. sub.MemberTags для этого не годится — после
+// flush, отбросившего сервер, тег там остаётся, а default на необъявленный
+// outbound роняет старт движка мимо Reload (watchdog → FATAL).
+//
+// Пишется ЗАКОММИЧЕННОЕ состояние: если открыт пакет другой подписки, память
+// несёт его незакоммиченные правки, и записать их мимо flush нельзя. Тогда
+// default ставится и в снимок пакета (переживёт его откат), и в память
+// (переживёт его коммит).
+func (a *OperatorAdapter) PersistSelectorDefault(selectorTag, memberTag string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.loadErr != nil {
+		return fmt.Errorf("%w: слот подписок не прочитан при старте (%v)", ErrValidation, a.loadErr)
+	}
+	committed := slotConfig{Inbounds: a.cfg.Inbounds, Outbounds: a.cfg.Outbounds, Route: a.cfg.Route}
+	if a.pending != nil {
+		route := make(map[string]any, len(a.cfg.Route))
+		for k, v := range a.cfg.Route {
+			route[k] = v
+		}
+		route["rules"] = a.pending.rules
+		committed = slotConfig{Inbounds: a.pending.inbounds, Outbounds: a.pending.outbounds, Route: route}
+	}
+	outbounds, ok := withSelectorDefault(committed.Outbounds, selectorTag, memberTag)
+	if !ok {
+		return fmt.Errorf("subscription adapter: selector %q with member %q not in slot", selectorTag, memberTag)
+	}
+	committed.Outbounds = outbounds
+	data, err := json.MarshalIndent(committed, "", "  ")
+	if err != nil {
+		return fmt.Errorf("subscription adapter: marshal slot: %w", err)
+	}
+	if err := a.orch.SaveSilent(orchestrator.SlotSubscriptions, data); err != nil {
+		return fmt.Errorf("subscription adapter: save slot: %w", err)
+	}
+	if a.pending != nil {
+		a.pending.outbounds = outbounds
+		if inBatch, ok := withSelectorDefault(a.cfg.Outbounds, selectorTag, memberTag); ok {
+			a.cfg.Outbounds = inBatch
+		}
+	} else {
+		a.cfg.Outbounds = outbounds
+	}
+	return nil
+}
+
+// withSelectorDefault — копия outbounds, где у селектора tag стоит default.
+// false — селектора нет или member не входит в его outbounds. Карты не
+// правятся на месте: снимок пакета делит их с памятью (slotSnapshot).
+func withSelectorDefault(outbounds []any, tag, member string) ([]any, bool) {
+	for i, v := range outbounds {
+		ob, ok := v.(map[string]any)
+		if !ok || ob["tag"] != tag || ob["type"] != "selector" {
+			continue
+		}
+		if !selectorHasMember(ob, member) {
+			return nil, false
+		}
+		cp := make(map[string]any, len(ob))
+		for k, val := range ob {
+			cp[k] = val
+		}
+		cp["default"] = member
+		out := append([]any(nil), outbounds...)
+		out[i] = cp
+		return out, true
+	}
+	return nil, false
+}
+
+// selectorHasMember: outbounds в памяти слота всегда []any — слот собирается
+// json.Unmarshal (AddOutbound, LoadFromDisk).
+func selectorHasMember(ob map[string]any, member string) bool {
+	members, _ := ob["outbounds"].([]any)
+	for _, m := range members {
+		if m == member {
+			return true
+		}
+	}
+	return false
+}
+
 // SelectClashProxy hits the running sing-box Clash API to switch the
 // selector's active member at runtime, without triggering a config reload.
 func (a *OperatorAdapter) SelectClashProxy(selectorTag, memberTag string) error {

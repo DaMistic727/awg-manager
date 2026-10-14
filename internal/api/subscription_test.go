@@ -33,6 +33,7 @@ func (noopMutator) EnsureProxy(context.Context, int, int, string, string) error 
 func (noopMutator) RemoveProxy(context.Context, int, string) error              { return nil }
 func (noopMutator) Reload(context.Context) error                                { return nil }
 func (noopMutator) Rollback()                                                   {}
+func (noopMutator) PersistSelectorDefault(string, string) error                 { return nil }
 func (noopMutator) SelectClashProxy(string, string) error                       { return nil }
 func (noopMutator) GetClashSelectorActive(string) (string, error)               { return "", nil }
 func (noopMutator) DeclaredOutboundTags() []string                              { return nil }

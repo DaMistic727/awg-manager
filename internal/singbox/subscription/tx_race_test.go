@@ -55,6 +55,7 @@ func (m *txRaceMutator) AddRouteRule([]byte) error                              
 func (m *txRaceMutator) RemoveRouteRule(string, string) error                        { m.stage(); return nil }
 func (m *txRaceMutator) EnsureProxy(context.Context, int, int, string, string) error { return nil }
 func (m *txRaceMutator) RemoveProxy(context.Context, int, string) error              { return nil }
+func (m *txRaceMutator) PersistSelectorDefault(string, string) error                 { return nil }
 func (m *txRaceMutator) SelectClashProxy(string, string) error                       { return nil }
 func (m *txRaceMutator) GetClashSelectorActive(string) (string, error)               { return "", nil }
 func (m *txRaceMutator) DeclaredOutboundTags() []string                              { return nil }
