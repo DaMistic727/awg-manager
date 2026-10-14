@@ -127,10 +127,21 @@ func transportKey(ob map[string]any) string {
 }
 
 // fullKey is the widest identity: extendedKey plus the transport fields.
+//
+// realm_id дописывается только когда он есть: узлы за одним реле hysteria2
+// делят server:port (это адрес реле) и пароль и различаются лишь им — без
+// него один пропадал как дубликат (F366). Без realm ключ прежний, и теги уже
+// расширенных групп не переезжают.
 func fullKey(p vlink.ParsedOutbound) string {
 	var ob map[string]any
 	json.Unmarshal(p.Outbound, &ob)
-	return extendedKey(p) + "|" + transportKey(ob)
+	k := extendedKey(p) + "|" + transportKey(ob)
+	if r, ok := ob["realm"].(map[string]any); ok {
+		if id, _ := r["realm_id"].(string); id != "" {
+			k += "|realm:" + id
+		}
+	}
+	return k
 }
 
 func itoa(p uint16) string {

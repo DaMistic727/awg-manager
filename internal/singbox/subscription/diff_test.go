@@ -296,3 +296,30 @@ func TestApplyDiff_RealityOnlyKeepsExtendedTag(t *testing.T) {
 		t.Errorf("tag = %q, want extended-key tag %q (masking alone must not widen further)", got.New[0].Tag, want)
 	}
 }
+
+// mkParsedRealm — hysteria2 за реле: Server/Port — адрес реле, общий у всех
+// узлов за ним, различие только в realm_id (F366).
+func mkParsedRealm(realmID string) vlink.ParsedOutbound {
+	ob := map[string]any{
+		"type": "hysteria2", "password": "p",
+		"realm": map[string]any{"server_url": "https://relay.example.com:443", "token": "t", "realm_id": realmID},
+	}
+	raw, _ := json.Marshal(ob)
+	return vlink.ParsedOutbound{
+		Tag: "tmp", Protocol: "hysteria2", Server: "relay.example.com", Port: 443, Outbound: raw,
+	}
+}
+
+// F366: два узла за одним реле под одним паролем — разные узлы, а не дубликат;
+// одиночный realm-узел держит узкий ключ, как и прежде.
+func TestApplyDiff_RealmIDDistinguishesMembers(t *testing.T) {
+	got := ApplyDiff("sub", nil, []vlink.ParsedOutbound{mkParsedRealm("a"), mkParsedRealm("b")})
+	if got.SkippedDuplicate != 0 || len(got.New) != 2 || got.New[0].Tag == got.New[1].Tag {
+		t.Fatalf("SkippedDuplicate=%d New=%d — узлы за реле склеились", got.SkippedDuplicate, len(got.New))
+	}
+	single := mkParsedRealm("a")
+	one := ApplyDiff("sub", nil, []vlink.ParsedOutbound{single})
+	if want := stableTagFromKey("sub", identityKey(single)); len(one.New) != 1 || one.New[0].Tag != want {
+		t.Errorf("одиночный realm-узел сменил тег")
+	}
+}
