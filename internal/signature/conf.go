@@ -28,7 +28,7 @@ func HeaderOrDefault(v string, msgType int) string {
 //
 // Сервер без ASC (Jc == 0) — обычный WireGuard: ни числовых параметров, ни
 // сигнатуры в конфиг не пишем, иначе клиент получит обфускацию, которой на
-// сервере нет. Один writer на оба пути — встроенный сервер (internal/managed)
+// сервере нет. Один writer на оба пути — managed-сервер (internal/managed)
 // и системный (internal/api).
 func WriteASCConf(b *strings.Builder, raw json.RawMessage, packets GeneratedPackets) {
 	var ext ndms.ASCParamsExtended

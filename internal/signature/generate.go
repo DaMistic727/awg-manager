@@ -32,7 +32,9 @@ import (
 // интерфейсе отвечает `Message too large`. 3500 — этот порог с запасом.
 const MaxSignatureChars = 3500
 
-// DefaultProfile — профиль новых пиров встроенного сервера и дефолт выпадашки.
+// DefaultProfile — профиль новых пиров серверов (системного и managed) и
+// дефолт выпадашки. «Встроенный сервер» в коде — только сервер, созданный
+// самим NDMS (internal/ndms/types.go), не наш managed (F180).
 const DefaultProfile = "quic_initial"
 
 // Profiles — каталог профилей имитации в порядке показа в UI.
