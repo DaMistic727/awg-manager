@@ -2273,3 +2273,38 @@ func TestCleanup_RemovesOwnDirNotBinaryDir(t *testing.T) {
 		t.Fatalf("свой каталог не снесён: %v", err)
 	}
 }
+
+// upx на месте и cp -p сохраняют mtime: подменённый бинарь другого размера
+// с прежним mtime сайдкаром больше не верится (F137). Сайдкар без размера
+// (старый или положенный руками) — по-прежнему по mtime.
+func TestReadFreshSidecar_SizeMismatchIsStale(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "sing-box")
+	if err := os.WriteFile(binary, []byte("v1-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSidecar(binary, "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := readFreshSidecar(binary); !ok || m.Version != "1.0.0" {
+		t.Fatalf("свежий сайдкар: %+v %v", m, ok)
+	}
+	// Подмена с сохранением mtime.
+	fi, _ := os.Stat(binary)
+	if err := os.WriteFile(binary, []byte("v2-binary-other-size"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(binary, fi.ModTime(), fi.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readFreshSidecar(binary); ok {
+		t.Fatal("сайдкар поверили при другом размере бинаря")
+	}
+	// Сайдкар без размера — сверка только по mtime.
+	if err := os.WriteFile(binary+singboxMetaSidecarSuffix, []byte(`{"version":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readFreshSidecar(binary); !ok {
+		t.Fatal("сайдкар без размера отвергнут")
+	}
+}

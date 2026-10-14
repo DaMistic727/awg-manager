@@ -246,10 +246,16 @@ func (o *Operator) featuresForVersion(v string) []string {
 // сайдкаров игнорируется: теги теперь из installer.RequiredTags.
 type metaSidecar struct {
 	Version string `json:"version"`
+	// Size — размер бинаря на момент записи: upx/upx -d на месте и cp -p
+	// сохраняют mtime, и подменённый бинарь другой версии иначе отдал бы
+	// старую версию из сайдкара (F137). 0 — сайдкар без поля (старый или
+	// положенный руками), сверяется только по mtime.
+	Size int64 `json:"size,omitempty"`
 }
 
 // readFreshSidecar returns the sidecar contents iff the file exists,
-// its mtime is ≥ the binary's mtime, and the JSON parses. Any failure
+// its mtime is ≥ the binary's mtime, the JSON parses and its size (when
+// recorded) matches the binary. Any failure
 // returns ok=false — caller falls through to the next source in
 // resolveVersionLocked.
 func readFreshSidecar(binary string) (metaSidecar, bool) {
@@ -273,7 +279,7 @@ func readFreshSidecar(binary string) (metaSidecar, bool) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return metaSidecar{}, false
 	}
-	if m.Version == "" {
+	if m.Version == "" || (m.Size != 0 && m.Size != biFi.Size()) {
 		return metaSidecar{}, false
 	}
 	return m, true
@@ -284,7 +290,11 @@ func readFreshSidecar(binary string) (metaSidecar, bool) {
 // Best-effort: read-only filesystem / permission errors are returned
 // for logging but never abort the caller's flow.
 func writeSidecar(binary, version string) error {
-	data, err := json.Marshal(metaSidecar{Version: version})
+	m := metaSidecar{Version: version}
+	if fi, err := os.Stat(binary); err == nil {
+		m.Size = fi.Size()
+	}
+	data, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
