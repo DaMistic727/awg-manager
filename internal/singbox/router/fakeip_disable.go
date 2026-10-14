@@ -222,10 +222,12 @@ func (s *ServiceImpl) disableFakeIPTun(ctx context.Context, settings *storage.Se
 	// а интерфейс с нашим описанием добирает reapOrphansByDescription, когда
 	// скан заработает. Ошибку гейта не возвращаем: выключение обязано дойти
 	// до персиста.
-	if proceed, _ := s.teardownGate(ctx, ndmsName, "fakeip-disable", fakeIPTunDescription); proceed {
+	if proceed, gateErr := s.teardownGate(ctx, ndmsName, "fakeip-disable", fakeIPTunDescription); proceed {
 		// (4c) Уборку осиротевшего kernel-netdev делает сам teardownOpkgTun —
 		// он же нужен откатам и реап-ретраям, которые ходят туда напрямую.
 		_ = s.teardownOpkgTun(ctx, ndmsName, "fakeip-disable")
+	} else if gateErr == nil {
+		s.warnPermitIndexChange("fakeip-disable", ndmsName)
 	}
 
 	// Remove specific CIDR routes on disable. After fakeip is off these

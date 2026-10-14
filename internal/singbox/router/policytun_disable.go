@@ -101,6 +101,7 @@ func (s *ServiceImpl) disablePolicyTun(ctx context.Context, settings *storage.Se
 	switch ownership {
 	case ownershipForeign:
 		s.appLog.Warn("policy-tun-disable", ndmsName, "на этом номере нет нашего OpkgTun — интерфейс не трогаем")
+		s.warnPermitIndexChange("policy-tun-disable", ndmsName)
 	case ownershipUnknown:
 		s.appLog.Warn("policy-tun-disable", ndmsName, "скан владения NDMS недоступен — интерфейс не трогаем, повтор следующим тиком")
 	}

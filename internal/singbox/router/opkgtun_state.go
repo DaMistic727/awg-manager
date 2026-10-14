@@ -165,6 +165,16 @@ func (s *ServiceImpl) teardownGate(ctx context.Context, ndmsName, scope string, 
 	return true, nil
 }
 
+// warnPermitIndexChange — номер режима занят чужим OpkgTun, запись владения
+// снимается: при следующем включении режим получит другой номер, и permit'ы
+// политик, выписанные на прежнее имя, повиснут. Предупреждение «индекс
+// изменился» на включении сюда не доходит — сравнивать будет не с чем (F320).
+// Только для выключения и реапа: при передаче записи (handover) то
+// предупреждение срабатывает само, а при удалении пакета включения не будет.
+func (s *ServiceImpl) warnPermitIndexChange(scope, ndmsName string) {
+	s.appLog.Warn(scope, ndmsName, "при следующем включении режим получит другой номер OpkgTun — проверьте permit в политиках")
+}
+
 // releaseForeignOpkgTun освобождает запись владения ЧУЖОГО режима перед её
 // перезаписью (handover в enable) или снятием (персист-реап): для policy-tun
 // сперва восстановить записанный NAT сегментов (best-effort, Warn — как в

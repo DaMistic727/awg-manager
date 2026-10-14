@@ -245,6 +245,10 @@ func (s *ServiceImpl) ReapOrphanedFakeIPTun(ctx context.Context) error {
 			// протухла). Та же форма, что в fakeip-реапе ниже.
 			if removed {
 				s.appLog.Info("policy-tun-reap", ownedPolicy, "removed orphaned policy-tun OpkgTun (mode != policy-tun)")
+			} else {
+				// !removed без ошибки — пропуск чужого интерфейса (провал сноса
+				// и «скан упал» приходят ошибкой); запись снимается ниже.
+				s.warnPermitIndexChange("policy-tun-reap", ownedPolicy)
 			}
 			if err := s.deps.Settings.SetOpkgTunState(nil); err != nil {
 				s.appLog.Warn("policy-tun-reap", ownedPolicy, "clear policy-tun persist: "+err.Error())
@@ -321,7 +325,9 @@ func (s *ServiceImpl) ReapOrphanedFakeIPTun(ctx context.Context) error {
 	if gateErr != nil {
 		return nil
 	}
-	if proceed {
+	if !proceed {
+		s.warnPermitIndexChange("fakeip-reap", owned)
+	} else {
 		if err := s.teardownOpkgTun(ctx, owned, "fakeip-reap"); err != nil {
 			// Keep the persist on failure: the next tick/boot retries the reap
 			// rather than leaking the orphan forever. teardownOpkgTun has already
