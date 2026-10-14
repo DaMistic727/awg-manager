@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { editTunnelSchema } from './tunnel';
+import { tunnelNameError } from '$lib/utils/tunnelName';
 
 // Minimal valid payload; individual tests override `endpoint`.
 function base(endpoint: string) {
@@ -184,5 +185,29 @@ describe('editTunnelSchema header protection padding', () => {
     it('leaves S values alone when no key is set', () => {
         const res = editTunnelSchema.safeParse({ ...base('1.2.3.4:51820'), s1: 0, s2: 0, s3: 0, s4: 0 });
         expect(res.success).toBe(true);
+    });
+});
+
+describe('editTunnelSchema name', () => {
+    function nameErr(name: string): string | undefined {
+        const res = editTunnelSchema.safeParse({ ...base('1.2.3.4:51820'), name });
+        if (res.success) return undefined;
+        return res.error.issues.find(i => i.path[0] === 'name')?.message;
+    }
+
+    it('принимает кириллицу, пробелы и имя длиннее 15 символов', () => {
+        expect(nameErr('Мой туннель — Нидерланды')).toBeUndefined();
+        expect(nameErr('1-tunnel name')).toBeUndefined();
+    });
+
+    it('предел — 256 байт UTF-8, а не символов', () => {
+        expect(nameErr('я'.repeat(128))).toBeUndefined();
+        expect(nameErr('я'.repeat(129))).toBe(tunnelNameError('я'.repeat(129)));
+        expect(nameErr('a'.repeat(256))).toBeUndefined();
+        expect(nameErr('a'.repeat(257))).toBeDefined();
+    });
+
+    it('пустое имя отвергается', () => {
+        expect(nameErr('')).toBeDefined();
     });
 });

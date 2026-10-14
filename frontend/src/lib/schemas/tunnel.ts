@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { m } from '$lib/i18n';
 import { MAX_SIGNATURE_CHARS } from '$lib/utils/protocols';
+import { TUNNEL_NAME_MAX_BYTES, tunnelNameBytes } from '$lib/utils/tunnelName';
 
 // Header protection takes its 12-byte nonce from the front of the Sx junk
 // padding (S1 initiation, S2 response, S3 cookie, S4 transport), so shorter
@@ -27,10 +28,13 @@ const u16RangeField = () =>
 
 // Edit tunnel schema - flat structure matching the edit form
 export const editTunnelSchema = z.object({
+    // Имя — описание записи интерфейса в NDMS, а не имя интерфейса ядра:
+    // сервер (tunnel.ValidateName) ограничивает только длину в байтах UTF-8.
     name: z.string()
         .min(1, { error: () => m.validation_name_required() })
-        .max(15, { error: () => m.validation_name_max() })
-        .regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/, { error: () => m.validation_name_start_letter() }),
+        .refine((v) => tunnelNameBytes(v) <= TUNNEL_NAME_MAX_BYTES, {
+            error: () => m.validation_tunnel_name_too_long({ max: TUNNEL_NAME_MAX_BYTES }),
+        }),
     ispInterface: z.string().default(''),
     // Interface fields
     address: z.string().min(1, { error: () => m.validation_address_required() }),

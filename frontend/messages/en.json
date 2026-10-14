@@ -1045,8 +1045,6 @@
 	"awg_param_hint_i4": "Signature packet I4.",
 	"awg_param_hint_i5": "Signature packet I5.",
 	"validation_name_required": "Name is required",
-	"validation_name_max": "At most 15 characters",
-	"validation_name_start_letter": "Must start with a letter",
 	"validation_address_required": "Address is required",
 	"validation_dns_list": "Enter IP addresses separated by commas (e.g. 1.1.1.1, 8.8.8.8)",
 	"validation_endpoint_required": "Endpoint is required",

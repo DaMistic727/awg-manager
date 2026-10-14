@@ -1065,8 +1065,6 @@
 	"awg_param_hint_i4": "Signature пакет I4.",
 	"awg_param_hint_i5": "Signature пакет I5.",
 	"validation_name_required": "Название обязательно",
-	"validation_name_max": "Максимум 15 символов",
-	"validation_name_start_letter": "Должно начинаться с буквы",
 	"validation_address_required": "Адрес обязателен",
 	"validation_dns_list": "Введите IP-адреса через запятую (например, 1.1.1.1, 8.8.8.8)",
 	"validation_endpoint_required": "Endpoint обязателен",
