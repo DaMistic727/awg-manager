@@ -21,7 +21,15 @@ type Store struct {
 	path string
 	mu   sync.RWMutex
 	data map[string]*Subscription
+	// onChange зовётся после каждой успешной записи на диск: одна точка на
+	// REST, MCP и фоновое обновление — подсказка инвалидации фронту (MC9).
+	// Ставится до начала работы (SetOnChange) и дальше не меняется.
+	onChange func()
 }
+
+// SetOnChange подключает уведомление об изменении. Вызывается под замком
+// стора — обязано быть неблокирующим (events.Bus.Publish таков).
+func (s *Store) SetOnChange(fn func()) { s.onChange = fn }
 
 func NewStore(path string) (*Store, error) {
 	s := &Store{path: path, data: make(map[string]*Subscription)}
@@ -89,7 +97,13 @@ func (s *Store) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return storage.AtomicWrite(s.path, b)
+	if err := storage.AtomicWrite(s.path, b); err != nil {
+		return err
+	}
+	if s.onChange != nil {
+		s.onChange()
+	}
+	return nil
 }
 
 // cloneSlice копирует срез с сохранением nil-ности: nil остаётся nil (важно

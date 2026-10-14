@@ -13,6 +13,7 @@ export type ResourceKey =
 	| 'servers'                     // ResourceServers
 	| 'singbox.status'              // ResourceSingboxStatus
 	| 'singbox.tunnels'             // ResourceSingboxTunnels
+	| 'singbox.subscriptions'       // ResourceSingboxSubscriptions — любая запись подписки
 	| 'singbox.proxies'             // ResourceSingboxProxies (no backend publisher yet — invalidate via store.refetch)
 	| 'sysInfo'                     // ResourceSysInfo
 	| 'pingcheck'                   // ResourcePingcheck

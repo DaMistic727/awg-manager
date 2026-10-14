@@ -114,6 +114,9 @@ func (m *Migrator) MigrateOff(ctx context.Context) error {
 	if m.op.bus != nil {
 		m.op.bus.PublishInvalidated(events.ResourceSingboxStatus, "ndms-proxy-migration")
 		m.op.bus.PublishInvalidated(events.ResourceSingboxTunnels, "ndms-proxy-migration")
+		// Номер ProxyN подписки в списке зависит от тумблера, а не от записи
+		// подписки — её стор сам не уведомит (MC9).
+		m.op.bus.PublishInvalidated(events.ResourceSingboxSubscriptions, "ndms-proxy-migration")
 	}
 	return nil
 }
@@ -166,6 +169,9 @@ func (m *Migrator) MigrateOn(ctx context.Context) error {
 	if m.op.bus != nil {
 		m.op.bus.PublishInvalidated(events.ResourceSingboxStatus, "ndms-proxy-migration")
 		m.op.bus.PublishInvalidated(events.ResourceSingboxTunnels, "ndms-proxy-migration")
+		// Номер ProxyN подписки в списке зависит от тумблера, а не от записи
+		// подписки — её стор сам не уведомит (MC9).
+		m.op.bus.PublishInvalidated(events.ResourceSingboxSubscriptions, "ndms-proxy-migration")
 	}
 	return nil
 }

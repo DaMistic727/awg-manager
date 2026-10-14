@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,5 +272,33 @@ func TestStore_MoveToExcluded_And_Reduce(t *testing.T) {
 	got2, _ := st.Get(sub.ID)
 	if len(got2.ExcludedTags) != 0 {
 		t.Fatalf("want empty after reduce, got %v", got2.ExcludedTags)
+	}
+}
+
+// MC9: каждая успешная запись стора — уведомление (подсказка фронту), одна
+// точка на REST, MCP и фоновое обновление; отказанная правка — нет.
+func TestStore_OnChangeAfterEachWrite(t *testing.T) {
+	s, err := NewStore(filepath.Join(t.TempDir(), "subs.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	s.SetOnChange(func() { n++ })
+
+	sub, err := s.Create(CreateInput{Label: "a", URL: "https://x/a", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMembersExtras(sub.ID, nil, nil, nil, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.mutate(sub.ID, func(*Subscription) error { return errors.New("отказ") }); err == nil {
+		t.Fatal("ждали отказ мутатора")
+	}
+	if err := s.Delete(sub.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("уведомлений %d, want 3 (create, update, delete)", n)
 	}
 }

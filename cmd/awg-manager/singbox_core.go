@@ -246,6 +246,12 @@ func (a *app) setupSingboxRuntime() {
 	a.subStore, err = subscription.NewStore(subStorePath)
 	if err != nil {
 		a.bootLog.Error("subscription-store", "", err.Error())
+	} else {
+		// Любая запись подписки — подсказка фронту вместо 30-секундного
+		// опроса (MC9).
+		a.subStore.SetOnChange(func() {
+			a.eventBus.PublishInvalidated(events.ResourceSingboxSubscriptions, "subscriptions")
+		})
 	}
 	subProxyMgr := singbox.NewProxyManager(a.ndmsQueries, a.ndmsCommands)
 	a.subAdapter = subscription.NewOperatorAdapter(a.sbOrch, a.singboxOp.SubscriptionProxyRegistrar(subProxyMgr), a.singboxOp.Clash())

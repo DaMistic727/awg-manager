@@ -29,6 +29,7 @@ const (
 
 	ResourceSingboxStatus        Resource = "singbox.status"
 	ResourceSingboxTunnels       Resource = "singbox.tunnels"
+	ResourceSingboxSubscriptions Resource = "singbox.subscriptions"
 	ResourceSingboxRouterStaging Resource = "singbox.router.staging"
 	ResourceSingboxRouterRules   Resource = "singbox.router.rules"
 	ResourceBypassSet            Resource = "bypass-set"
@@ -60,6 +61,7 @@ var AllResources = []Resource{
 	ResourceMcpKeys,
 	ResourceSingboxStatus,
 	ResourceSingboxTunnels,
+	ResourceSingboxSubscriptions,
 	ResourceSingboxRouterStaging,
 	ResourceSingboxRouterRules,
 	ResourceBypassSet,
