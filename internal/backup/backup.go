@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -298,6 +300,14 @@ var hardwareBound = []string{
 	"singbox/sing-box.meta.json",
 }
 
+var atomicTmpName = regexp.MustCompile(`\.tmp[.-][0-9]+(\.[0-9]+)?$`)
+
+// stateFileName — имя, под которым живут файлы состояния. Каталог с таким
+// именем Export не производит НИКОГДА; из архива он — подлог, и на месте
+// файла ломает его владельца навсегда: .bak настроек не обновляется,
+// McpKeyStore получает EISDIR (F212).
+var stateFileName = regexp.MustCompile(`\.(json|json\.bak|json\.corrupt|conf)$`)
+
 func isHardwareBound(rel string) bool {
 	for _, p := range hardwareBound {
 		if rel == p || strings.HasPrefix(rel, p+"/") {
@@ -343,6 +353,14 @@ func shouldSkip(rel string) bool {
 		return true
 	}
 	if strings.HasSuffix(rel, ".tmp") || strings.HasSuffix(rel, ".pid") {
+		return true
+	}
+	// Временные файлы атомарной записи: «<имя>.tmp.<цифры>» (os.CreateTemp в
+	// storage.AtomicWritePerm), «<имя>.tmp.<pid>.<нс>» (geodata) и
+	// «<имя>.tmp-<нс>» (downloader — в т.ч. бинарь sing-box посреди загрузки).
+	// Суффикс .tmp выше их не ловит никогда (F249) — без этого Export,
+	// пришедшийся на запись, кладёт в архив лишнюю копию файла.
+	if atomicTmpName.MatchString(path.Base(rel)) {
 		return true
 	}
 	if strings.HasSuffix(rel, ".lock") || strings.HasSuffix(rel, ".lock.d") {
@@ -391,6 +409,11 @@ func writeTarBytes(tw *tar.Writer, name string, data []byte, mod time.Time) erro
 	return err
 }
 
+var (
+	errUnsafeArchivePath = errors.New("небезопасный путь в архиве")
+	errNotOurArchive     = errors.New("недопустимое имя записи в архиве — это не резервная копия awg-manager")
+)
+
 func extractArchive(r io.Reader, destDir string) error {
 	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return err
@@ -416,8 +439,11 @@ func extractArchive(r io.Reader, destDir string) error {
 		}
 		name := filepath.Clean(hdr.Name)
 		name = filepath.ToSlash(name)
+		// Тексты отказов не цитируют вход: имя записи — произвольная строка
+		// произвольной длины из чужого архива, и она ушла бы в ответ API и в
+		// журнал (F207).
 		if name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
-			return fmt.Errorf("небезопасный путь в архиве: %q", hdr.Name)
+			return errUnsafeArchivePath
 		}
 		// Отказ, а не нормализация: наш Export строит имена через filepath.Rel
 		// и потому НИКОГДА не пишет ни абсолютных имён, ни имени корня — такое
@@ -431,11 +457,11 @@ func extractArchive(r io.Reader, destDir string) error {
 		// устройства, и run/, и locks/). Имя корня (".") Export пропускает
 		// явно, а при распаковке оно означало бы запись поверх самого каталога.
 		if strings.HasPrefix(name, "/") || name == "." {
-			return fmt.Errorf("недопустимое имя записи в архиве — это не резервная копия awg-manager")
+			return errNotOurArchive
 		}
 		// Симметрия с выгрузкой: чего мы принципиально не кладём в архив,
 		// того из архива принципиально не достаём. Без этого подложенный
-		// .device-key ложился бы в каталог данных (и правами из tar-заголовка),
+		// .device-key ложился бы в каталог данных,
 		// то есть автор чужого архива знал бы секрет устройства и расшифровал
 		// бы всё, что пользователь после восстановления зашифрует.
 		//
@@ -453,7 +479,18 @@ func extractArchive(r io.Reader, destDir string) error {
 		}
 		target := filepath.Join(destDir, filepath.FromSlash(name))
 		if !strings.HasPrefix(target, destDir+string(os.PathSeparator)) && target != destDir {
-			return fmt.Errorf("небезопасный путь в архиве: %q", hdr.Name)
+			return errUnsafeArchivePath
+		}
+		// Каталог под именем файла состояния — и явной записью, и как
+		// родитель файла ("settings.json.bak/x" создаёт его через MkdirAll).
+		dirPart := path.Dir(name)
+		if hdr.Typeflag == tar.TypeDir {
+			dirPart = name
+		}
+		for p := dirPart; p != "." && p != "/"; p = path.Dir(p) {
+			if stateFileName.MatchString(p) {
+				return errNotOurArchive
+			}
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
@@ -468,7 +505,16 @@ func extractArchive(r io.Reader, destDir string) error {
 			if total > maxArchiveLen {
 				return fmt.Errorf("архив слишком большой (лимит %d МБ)", maxArchiveLen>>20)
 			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode).Perm())
+			// Права свои, а не из заголовка (F206): иначе автор архива задал бы
+			// 0777 settings.json с ключами пиров и apiKey. Только владелец; бит
+			// исполнения переносится — в каталоге данных лежат наши скрипты
+			// (singbox/awgm-ctclean6.sh), а исполнимость файла данных ничего
+			// не даёт: запускаем мы только свои пути.
+			perm := os.FileMode(0o600)
+			if hdr.Mode&0o100 != 0 {
+				perm = 0o700
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 			if err != nil {
 				return err
 			}
@@ -502,7 +548,7 @@ func validateStaging(dir string) error {
 		return fmt.Errorf("некорректный %s: %w", ManifestName, err)
 	}
 	if manifest.Type != FileType {
-		return fmt.Errorf("неподдерживаемый тип архива: %q", manifest.Type)
+		return errors.New("неподдерживаемый тип архива — это не резервная копия awg-manager")
 	}
 	if manifest.Version < 1 || manifest.Version > FileVersion {
 		return fmt.Errorf("версия архива %d не поддерживается", manifest.Version)

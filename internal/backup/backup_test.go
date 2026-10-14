@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -729,8 +730,8 @@ func TestRestoreRejectsSettingsAsDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("архив с каталогом вместо settings.json принят")
 	}
-	if !strings.Contains(err.Error(), "settings.json") {
-		t.Fatalf("err = %v, ждали упоминание settings.json", err)
+	if !errors.Is(err, errNotOurArchive) {
+		t.Fatalf("err = %v, ждали отказ «не наш архив»", err)
 	}
 	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
 		t.Fatalf("каталог данных создан отвергнутым архивом: err=%v", err)
@@ -884,5 +885,116 @@ func TestExportSkipsRestoreTmp(t *testing.T) {
 	}
 	if names := strings.Join(tarNames(t, buf.Bytes()), " "); strings.Contains(names, restoreTmpDir) {
 		t.Errorf("временный каталог в архиве: %s", names)
+	}
+}
+
+// forgedTar — архив из заголовков как есть: режим, тип, имя задаёт тест.
+func forgedTar(t *testing.T, hdrs []tar.Header, bodies []string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for i := range hdrs {
+		h := hdrs[i]
+		h.Size = int64(len(bodies[i]))
+		if err := tw.WriteHeader(&h); err != nil {
+			t.Fatalf("WriteHeader %s: %v", h.Name, err)
+		}
+		if _, err := tw.Write([]byte(bodies[i])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// F206: права восстановленных файлов свои — только владелец; режим из
+// заголовка чужого архива (0777) не переносится. Бит исполнения — да (наши
+// скрипты в каталоге данных).
+func TestRestore_FilePermsAreOurs(t *testing.T) {
+	archive := forgedTar(t, []tar.Header{
+		{Name: ManifestName, Mode: 0o644, Typeflag: tar.TypeReg},
+		{Name: "settings.json", Mode: 0o777 &^ 0o111, Typeflag: tar.TypeReg},
+		{Name: "singbox/awgm-ctclean6.sh", Mode: 0o777, Typeflag: tar.TypeReg},
+	}, []string{validManifestJSON, `{"version":32}`, "#!/bin/sh\n"})
+	dataDir := filepath.Join(t.TempDir(), "awg-manager")
+	if err := Restore(dataDir, bytes.NewReader(archive)); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	for name, want := range map[string]os.FileMode{
+		"settings.json":            0o600,
+		"singbox/awgm-ctclean6.sh": 0o700,
+	} {
+		st, err := os.Stat(filepath.Join(dataDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := st.Mode().Perm(); got != want {
+			t.Errorf("%s: права %o, ждали %o", name, got, want)
+		}
+	}
+}
+
+// F212: каталог под именем файла состояния — подлог; ломал бы .bak настроек и
+// McpKeyStore навсегда. И явной записью-каталогом, и как родитель файла.
+func TestRestore_RejectsStateFileNamedDirectories(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		hdr  tar.Header
+	}{
+		{"явный каталог .bak", tar.Header{Name: "settings.json.bak/", Mode: 0o755, Typeflag: tar.TypeDir}},
+		{"родитель файла", tar.Header{Name: "mcp_keys.json/x", Mode: 0o644, Typeflag: tar.TypeReg}},
+		{"вложенный .conf", tar.Header{Name: "tunnels/awg10.conf/x", Mode: 0o644, Typeflag: tar.TypeReg}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			archive := forgedTar(t, []tar.Header{
+				{Name: ManifestName, Mode: 0o644, Typeflag: tar.TypeReg},
+				{Name: "settings.json", Mode: 0o644, Typeflag: tar.TypeReg},
+				tc.hdr,
+			}, []string{validManifestJSON, `{"version":32}`, ""})
+			dataDir := filepath.Join(t.TempDir(), "awg-manager")
+			if err := Restore(dataDir, bytes.NewReader(archive)); !errors.Is(err, errNotOurArchive) {
+				t.Fatalf("err = %v, ждали отказ «не наш архив»", err)
+			}
+		})
+	}
+}
+
+// F207: отказ не цитирует присланное имя или тип — это произвольная строка из
+// чужого архива, а текст уходит в ответ API и журнал.
+func TestRestore_ErrorsDoNotQuoteArchiveInput(t *testing.T) {
+	const marker = "ZZZ-attacker-controlled"
+	for _, files := range []map[string]string{
+		{ManifestName: validManifestJSON, "../" + marker: "x"},
+		{ManifestName: `{"version":1,"type":"` + marker + `"}`, "settings.json": "{}"},
+	} {
+		err := Restore(filepath.Join(t.TempDir(), "d"), bytes.NewReader(forgedArchive(t, files)))
+		if err == nil {
+			t.Fatal("подложный архив принят")
+		}
+		if strings.Contains(err.Error(), marker) {
+			t.Fatalf("отказ цитирует вход: %v", err)
+		}
+	}
+}
+
+// F249: временные файлы атомарной записи в бэкап не едут.
+func TestShouldSkip_AtomicTempFiles(t *testing.T) {
+	for rel, want := range map[string]bool{
+		"settings.json.tmp.123456789":         true,
+		"tunnels/awg10.json.tmp.42":           true,
+		"geo/list.dat.tmp.1234.17000000000":   true,
+		"singbox/sing-box.tmp.tmp-1700000000": true,
+		"settings.json":                       false,
+		"notes.tmp.txt":                       false,
+	} {
+		if got := shouldSkip(rel); got != want {
+			t.Errorf("shouldSkip(%q) = %v, ждали %v", rel, got, want)
+		}
 	}
 }
