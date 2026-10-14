@@ -71,13 +71,12 @@
 					errorCorrectionLevel: 'L',
 					color: { dark: '#000000', light: '#ffffff' }
 				});
-			} catch (e) {
-				const size = new Blob([conf]).size;
-				if (size > 2900) {
-					notifications.error(m.servers_conf_qr_too_large({ size }), 8000);
-				} else {
-					notifications.error(m.servers_conf_qr_failed());
-				}
+			} catch {
+				// Строку библиотека отвергает только по объёму, а порог зависит
+				// от режима кодирования, не от байтов: порог по размеру (2900)
+				// называл «ошибкой генерации» и не тот отказ (F178). Число —
+				// размер самой конфигурации, как у ссылки (LinkBox).
+				notifications.error(m.servers_conf_qr_too_large({ size: new Blob([conf]).size }), 8000);
 				return;
 			} finally {
 				qrGenerating = false;

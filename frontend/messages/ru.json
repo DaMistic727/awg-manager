@@ -1641,7 +1641,6 @@
 	"servers_endpoint_title": "Endpoint клиентов",
 	"servers_conf_load_failed": "Ошибка загрузки",
 	"servers_conf_qr_too_large": "Конфигурация слишком большая для QR-кода ({size} байт). Используйте .conf файл.",
-	"servers_conf_qr_failed": "Ошибка генерации QR-кода",
 	"servers_conf_title": "Конфигурация клиента",
 	"servers_conf_qr_alt": "QR-код конфигурации",
 	"servers_conf_qr_hint": "Отсканируйте в AmneziaWG / WireGuard",

@@ -1607,7 +1607,6 @@
 	"servers_endpoint_title": "Client endpoint",
 	"servers_conf_load_failed": "Loading failed",
 	"servers_conf_qr_too_large": "The configuration is too large for a QR code ({size} bytes). Use the .conf file.",
-	"servers_conf_qr_failed": "QR code generation failed",
 	"servers_conf_title": "Client configuration",
 	"servers_conf_qr_alt": "Configuration QR code",
 	"servers_conf_qr_hint": "Scan with the AmneziaWG / WireGuard app",
