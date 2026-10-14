@@ -481,3 +481,77 @@ func TestFailoverManager_HandlePingCheckEvent_TriggersFailWithNonZeroCount(t *te
 		t.Error("tunnel1 should be in failedSet for real failure")
 	}
 }
+
+// F287: медленная сверка не должна стоить пропущенных событий. Пока reconcile
+// первого туннеля висит на RCI, шина заливается чужими событиями (>64 —
+// буфер подписчика); падение второго туннеля после этого обязано дойти.
+func TestFailoverManager_SlowReconcileDoesNotDropEvents(t *testing.T) {
+	bus := events.NewBus()
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var first atomic.Bool
+	fm := NewFailoverManager(func() error {
+		if first.CompareAndSwap(false, true) {
+			close(entered)
+			<-release // первая сверка «висит» на RCI
+		}
+		return nil
+	})
+	fm.StartListener(bus)
+	defer fm.StopListener()
+
+	bus.Publish("pingcheck:state", events.PingCheckStateEvent{TunnelID: "tun1", Status: "fail", FailCount: 3})
+	<-entered // сверка tun1 началась и висит
+	// Волнами по 32 с паузой: живой слушатель успевает выбрать каждую волну
+	// (подряд 200 публикаций переполнили бы буфер 64 при любом слушателе), а
+	// слушатель, висящий в сверке, не выбирает ничего — буфер переполняется.
+	for wave := 0; wave < 8; wave++ {
+		for i := 0; i < 32; i++ {
+			bus.Publish("tunnel:traffic", i)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	bus.Publish("pingcheck:state", events.PingCheckStateEvent{TunnelID: "tun2", Status: "fail", FailCount: 3})
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !fm.IsFailed("tun2") {
+		if time.Now().After(deadline) {
+			t.Fatal("падение tun2 потеряно, пока висела сверка tun1")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// F287: игнорируемое событие того же туннеля (стартовый fail с failCount=0)
+// не затирает в очереди настоящий переход, пока исполнитель занят.
+func TestFailoverManager_IgnoredEventDoesNotOverwritePending(t *testing.T) {
+	bus := events.NewBus()
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	var first atomic.Bool
+	fm := NewFailoverManager(func() error {
+		if first.CompareAndSwap(false, true) {
+			close(entered)
+			<-release
+		}
+		return nil
+	})
+	fm.StartListener(bus)
+	defer fm.StopListener()
+
+	bus.Publish("pingcheck:state", events.PingCheckStateEvent{TunnelID: "tun1", Status: "fail", FailCount: 3})
+	<-entered // исполнитель висит в сверке tun1
+	bus.Publish("pingcheck:state", events.PingCheckStateEvent{TunnelID: "tun2", Status: "fail", FailCount: 3})
+	bus.Publish("pingcheck:state", events.PingCheckStateEvent{TunnelID: "tun2", Status: "fail", FailCount: 0})
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for !fm.IsFailed("tun2") {
+		if time.Now().After(deadline) {
+			t.Fatal("настоящий fail tun2 затёрт игнорируемым событием")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

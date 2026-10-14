@@ -37,9 +37,23 @@ type FailoverManager struct {
 	// tunnels. A success for tunnel B clears the flag and won't retry tunnel A —
 	// but A's next pingcheck event will see alreadyFailed=false (after rollback)
 	// and proceed normally, so self-healing works via the periodic event stream.
-	dirty          bool
-	stopCh         chan struct{}
-	stopped        chan struct{}
+	dirty   bool
+	stopCh  chan struct{}
+	stopped chan struct{}
+
+	// pending — последнее состояние pingcheck по туннелю, ещё не обработанное
+	// (F287). Слушатель шины только кладёт сюда и будит исполнителя: сверка
+	// идёт RCI-записями и может висеть, а пока слушатель в ней, буфер
+	// подписчика (64) переполнялся и шина молча роняла события — в том числе
+	// fail другого туннеля, который публикуется один раз на порог.
+	// Схлопывание до последнего ЗНАЧИМОГО состояния (fail с failCount>0 или
+	// pass) корректно: важен итог, а повтор после неудачной сверки (dirty)
+	// держится на «следующем событии». Остаточный риск — всплеск быстрее
+	// разбора: его шина по-прежнему роняет, но слушатель теперь только
+	// разбирает и в RCI не ходит.
+	pendingMu      sync.Mutex
+	pending        map[string]events.PingCheckStateEvent
+	wake           chan struct{}
 	bus            *events.Bus
 	log            Logger
 	lookupAffected AffectedListsLookup
@@ -243,13 +257,22 @@ func (fm *FailoverManager) FailedTunnels() []string {
 func (fm *FailoverManager) StartListener(bus *events.Bus) {
 	fm.stopCh = make(chan struct{})
 	fm.stopped = make(chan struct{})
+	fm.pending = make(map[string]events.PingCheckStateEvent)
+	fm.wake = make(chan struct{}, 1)
 
 	_, ch, unsub := bus.Subscribe()
 
+	var wg sync.WaitGroup
+	wg.Add(2)
 	go func() {
-		defer close(fm.stopped)
-		defer unsub()
+		wg.Wait()
+		close(fm.stopped)
+	}()
 
+	// Слушатель: только разбор и постановка в pending — без RCI.
+	go func() {
+		defer wg.Done()
+		defer unsub()
 		for {
 			select {
 			case ev, ok := <-ch:
@@ -259,12 +282,65 @@ func (fm *FailoverManager) StartListener(bus *events.Bus) {
 				if ev.Type != "pingcheck:state" {
 					continue
 				}
-				fm.handlePingCheckEvent(ev.Data)
+				fm.enqueuePingCheckEvent(ev.Data)
 			case <-fm.stopCh:
 				return
 			}
 		}
 	}()
+
+	// Исполнитель: сверки по одной, в своём темпе.
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-fm.wake:
+				for _, ev := range fm.takePending() {
+					select {
+					case <-fm.stopCh:
+						return
+					default:
+					}
+					fm.handlePingCheckEvent(ev)
+				}
+			case <-fm.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (fm *FailoverManager) enqueuePingCheckEvent(data any) {
+	ev, ok := data.(events.PingCheckStateEvent)
+	if !ok {
+		// Разбор типа и предупреждение — у handlePingCheckEvent.
+		fm.handlePingCheckEvent(data)
+		return
+	}
+	// В очередь — только то, на что исполнитель отреагирует: игнорируемое
+	// событие (стартовый fail с failCount=0, прочие статусы) затёрло бы в
+	// pending настоящее состояние туннеля, и переход потерялся бы.
+	if !significantPingCheck(ev) {
+		return
+	}
+	fm.pendingMu.Lock()
+	fm.pending[ev.TunnelID] = ev
+	fm.pendingMu.Unlock()
+	select {
+	case fm.wake <- struct{}{}:
+	default: // исполнитель уже разбужен — заберёт и это
+	}
+}
+
+func (fm *FailoverManager) takePending() []events.PingCheckStateEvent {
+	fm.pendingMu.Lock()
+	defer fm.pendingMu.Unlock()
+	out := make([]events.PingCheckStateEvent, 0, len(fm.pending))
+	for id, ev := range fm.pending {
+		out = append(out, ev)
+		delete(fm.pending, id)
+	}
+	return out
 }
 
 // StopListener stops the event listener goroutine.
@@ -284,16 +360,20 @@ func (fm *FailoverManager) handlePingCheckEvent(data any) {
 		return
 	}
 
-	switch ev.Status {
-	case "fail":
-		// NDMS reports status="fail" with failCount=0 at tunnel startup
-		// before the first check completes. Ignore — no real failure yet.
-		// Real failures always have failCount > 0.
-		if ev.FailCount == 0 {
-			return
-		}
+	if !significantPingCheck(ev) {
+		return
+	}
+	if ev.Status == "fail" {
 		_ = fm.MarkFailed(ev.TunnelID)
-	case "pass":
+	} else {
 		_ = fm.MarkRecovered(ev.TunnelID)
 	}
+}
+
+// significantPingCheck — событие, на которое failover реагирует: pass или
+// настоящий fail. NDMS шлёт status="fail" с failCount=0 на старте туннеля, до
+// первой проверки — это ещё не отказ; прочие статусы (пустой на прогреве NWG)
+// failover не касаются.
+func significantPingCheck(ev events.PingCheckStateEvent) bool {
+	return ev.Status == "pass" || (ev.Status == "fail" && ev.FailCount > 0)
 }
