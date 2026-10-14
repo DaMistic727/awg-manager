@@ -61,7 +61,7 @@ func (h *SystemToolsHandler) emitFailure(action, subject, errText string) {
 func NewSystemToolsHandler(settings *storage.SettingsStore, log logging.AppLogger) *SystemToolsHandler {
 	return &SystemToolsHandler{
 		settings: settings,
-		log:      logging.NewScopedLogger(log, "system", "tools"),
+		log:      logging.NewScopedLogger(log, logging.GroupSystem, logging.SubTools),
 		files:    sysfiles.NewSandbox(nil),
 		services: services.NewScanner(),
 		opkg:     opkg.NewClient(),

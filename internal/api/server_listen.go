@@ -90,7 +90,7 @@ func NewServerListenHandler(ctrl ServerListenController, settings *storage.Setti
 	return &ServerListenHandler{
 		ctrl:     ctrl,
 		settings: settings,
-		log:      logging.NewScopedLogger(appLogger, logging.GroupSystem, "server-listen"),
+		log:      logging.NewScopedLogger(appLogger, logging.GroupSystem, logging.SubServerListen),
 	}
 }
 

@@ -40,6 +40,11 @@ export const SUBGROUP_FAMILY: Record<string, SubgroupFamily> = {
   // system
   'rci': 'system',
   'ndms': 'system',
+  'ndms-query': 'system',
+  'ndms-events': 'system',
+  'ndms-metrics': 'system',
+  'server-listen': 'system',
+  'tools': 'system',
   'storage': 'system',
   'http': 'system',
   'settings': 'system',
@@ -48,6 +53,8 @@ export const SUBGROUP_FAMILY: Record<string, SubgroupFamily> = {
   'system-tunnels': 'system',
   // feature
   'deviceproxy': 'feature',
+  'proxy': 'feature',
+  'awg3': 'feature',
   'managed': 'feature',
   'awg-outbounds': 'feature',
   'catalog': 'feature',

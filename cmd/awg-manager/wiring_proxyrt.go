@@ -54,10 +54,6 @@ import (
 // Проводка прокси-рантайма: аллокаторы номеров и портов, посев, менеджер,
 // фабрика инстансов и продуктовые ручки под /api/proxyrt/*.
 
-// proxySubgroup — подгруппа app-журнала прокси-рантайма (у старого мира была
-// своя, "wdtt": рантайм один на обе подсистемы, поэтому подгруппа общая).
-const proxySubgroup = "proxy"
-
 // proxyBackendWdttRaw — бэкенд зеркальной записи raw-клиента. Локальная
 // константа, а не импорт internal/wdtt: тот пакет умирает вместе со старым
 // движком (тот же приём, что у DefaultWdttIface).
@@ -733,7 +729,7 @@ var _ proxyrt.BackoffResetter = (*proxyAdoptedRole)(nil)
 // Зовётся ПОСЛЕ конструкции router-сервиса: proxyIngressEnsurer держит на нём
 // reconcile, а до присвоения a.routerSvc там nil.
 func (a *app) wireProxyrt() {
-	journal := logging.NewScopedLogger(a.loggingService, logging.GroupRouting, proxySubgroup)
+	journal := logging.NewScopedLogger(a.loggingService, logging.GroupRouting, logging.SubProxy) // одна подгруппа на WDTT и FreeTurn
 	// Хранилище — то же, что читают потребители вне рантайма (setupCore):
 	// писатель у proxy-instances.json один, и второй экземпляр развёл бы
 	// сериализацию записи по разным замкам.

@@ -50,15 +50,15 @@ func (a *ndmsLogAdapter) Debugf(format string, args ...any) {
 }
 
 func queryLogger(appLog logging.AppLogger) query.Logger {
-	return &ndmsLogAdapter{log: logging.NewScopedLogger(appLog, logging.GroupSystem, "ndms-query")}
+	return &ndmsLogAdapter{log: logging.NewScopedLogger(appLog, logging.GroupSystem, logging.SubNDMSQuery)}
 }
 
 func eventsLogger(appLog logging.AppLogger) events.Logger {
-	return &ndmsLogAdapter{log: logging.NewScopedLogger(appLog, logging.GroupSystem, "ndms-events")}
+	return &ndmsLogAdapter{log: logging.NewScopedLogger(appLog, logging.GroupSystem, logging.SubNDMSEvents)}
 }
 
 func metricsLogger(appLog logging.AppLogger) metrics.Logger {
-	return &ndmsLogAdapter{log: logging.NewScopedLogger(appLog, logging.GroupSystem, "ndms-metrics")}
+	return &ndmsLogAdapter{log: logging.NewScopedLogger(appLog, logging.GroupSystem, logging.SubNDMSMetrics)}
 }
 
 // runningInterfacesAdapter implements metrics.RunningInterfacesProvider
