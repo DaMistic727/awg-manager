@@ -630,6 +630,11 @@ func TestEnsureWG_AddressConflictIs409WithoutImport(t *testing.T) {
 		return awgmproto.State{PID: 42, WG: &awgmproto.WGState{Config: wgConf}}, true
 	}
 	tunnels.conflicts = []string{`Адрес 10.66.0.5 совпадает с туннелем "Сервер A" (opkgtun17). Одновременный запуск невозможен`}
+	// Виновник — туннель ДРУГОГО wdtt-клиента: только тогда совет про
+	// wdtt-server уместен (F140).
+	tunnels.tunnels = []storage.AWGTunnel{{ID: "a", Name: "Сервер A", WdttClientID: "other",
+		Interface: storage.AWGInterface{Address: "10.66.0.5/32"},
+		Peer:      storage.AWGPeer{PublicKey: "другой="}}}
 
 	rr := httptest.NewRecorder()
 	h.EnsureWGTunnel(rr, post(t, ``), rec.Key())
@@ -648,6 +653,110 @@ func TestEnsureWG_AddressConflictIs409WithoutImport(t *testing.T) {
 	if len(tunnels.imports) != 0 || len(tunnels.started) != 0 || tunnels.published != 0 {
 		t.Fatalf("при конфликте ничего не создаётся: imports=%d started=%d published=%d",
 			len(tunnels.imports), len(tunnels.started), tunnels.published)
+	}
+}
+
+// Адрес держит обычный (не wdtt) туннель: обновление wdtt-server тут ничего
+// не решит, совета нет — только адрес и виновник (F140).
+func TestEnsureWG_AddressConflictWithPlainTunnelHasNoServerAdvice(t *testing.T) {
+	rec := wgClient()
+	h, _, _, tunnels := newTestHandler(t, rec)
+	h.deps.Snapshots = func(key string) (awgmproto.State, bool) {
+		return awgmproto.State{PID: 42, WG: &awgmproto.WGState{Config: wgConf}}, true
+	}
+	tunnels.conflicts = []string{`Адрес 10.66.0.5 совпадает с туннелем "VPS" (opkgtun3). Одновременный запуск невозможен`}
+	tunnels.tunnels = []storage.AWGTunnel{{ID: "vps", Name: "VPS",
+		Interface: storage.AWGInterface{Address: "10.66.0.5/32"},
+		Peer:      storage.AWGPeer{PublicKey: "vpskey="}}}
+
+	rr := httptest.NewRecorder()
+	h.EnsureWGTunnel(rr, post(t, ``), rec.Key())
+	_, msg, code := decodeEnvelope(t, rr)
+	if rr.Code != http.StatusConflict || code != "WDTT_WG_ADDRESS_CONFLICT" {
+		t.Fatalf("status=%d code=%s msg=%q", rr.Code, code, msg)
+	}
+	if !strings.Contains(msg, "VPS") || strings.Contains(msg, "1.4.0-5") {
+		t.Fatalf("сообщение: %q", msg)
+	}
+}
+
+// Связанный туннель этого клиента, а конфиг сервера без [Peer] PublicKey:
+// по ключу его не найти, и гард адреса отказывал против него же (F141).
+func TestEnsureWG_OwnLinkedTunnelWithoutPeerKeyIsAdopted(t *testing.T) {
+	rec := wgClient()
+	h, _, _, tunnels := newTestHandler(t, rec)
+	noKey := "[Interface]\nPrivateKey = priv\nAddress = 10.66.0.5/32\n\n[Peer]\nEndpoint = 1.2.3.4:56001\n"
+	h.deps.Snapshots = func(string) (awgmproto.State, bool) {
+		return awgmproto.State{PID: 0, WG: &awgmproto.WGState{Config: noKey}}, true
+	}
+	tunnels.tunnels = []storage.AWGTunnel{{ID: "own", Name: "Германия wdtt", WdttClientID: "default",
+		Interface: storage.AWGInterface{PrivateKey: "priv", Address: "10.66.0.5/32"},
+		Peer:      storage.AWGPeer{Endpoint: "127.0.0.1:9100"}}}
+	tunnels.conflicts = []string{"против самого себя"}
+
+	rr := httptest.NewRecorder()
+	h.EnsureWGTunnel(rr, post(t, ``), rec.Key())
+	data, msg, code := decodeEnvelope(t, rr)
+	if code != "" || data["tunnelId"] != "own" || data["created"] != false {
+		t.Fatalf("ответ: %v (%s %s)", data, code, msg)
+	}
+	if len(tunnels.imports) != 0 || len(tunnels.deleted) != 0 {
+		t.Fatalf("imports=%v deleted=%v", tunnels.imports, tunnels.deleted)
+	}
+}
+
+// Сохранённый связанный туннель без ключа пира, а сервер теперь ключ шлёт:
+// запись устарела — снос и импорт, а не 409 против себя (F141).
+func TestEnsureWG_LinkedTunnelWithEmptyPeerKeyIsReplaced(t *testing.T) {
+	rec := wgClient()
+	h, _, _, tunnels := newTestHandler(t, rec)
+	h.deps.Snapshots = func(string) (awgmproto.State, bool) {
+		return awgmproto.State{PID: 0, WG: &awgmproto.WGState{Config: wgConf}}, true
+	}
+	tunnels.tunnels = []storage.AWGTunnel{{ID: "own", Name: "Германия wdtt", WdttClientID: "default",
+		Interface: storage.AWGInterface{PrivateKey: "priv", Address: "10.66.0.5/32"}}}
+	tunnels.nextID = "wg-2"
+
+	rr := httptest.NewRecorder()
+	h.EnsureWGTunnel(rr, post(t, ``), rec.Key())
+	if _, msg, code := decodeEnvelope(t, rr); code != "" {
+		t.Fatalf("отказ %s: %s", code, msg)
+	}
+	if !reflect.DeepEqual(tunnels.deleted, []string{"own"}) || len(tunnels.imports) != 1 {
+		t.Fatalf("deleted=%v imports=%d", tunnels.deleted, len(tunnels.imports))
+	}
+}
+
+// Абонента завели заново: ключ сервера тот же, свой ключ интерфейса другой.
+// Связанный туннель с прежним ключом мёртв — снос и импорт; несвязанный с
+// чужим ключом не усыновляется (F139).
+func TestEnsureWG_RecreatedSubscriberReplacesTunnel(t *testing.T) {
+	rec := wgClient()
+	h, _, _, tunnels := newTestHandler(t, rec)
+	h.deps.Snapshots = func(string) (awgmproto.State, bool) {
+		return awgmproto.State{PID: 0, WG: &awgmproto.WGState{Config: wgConf}}, true
+	}
+	tunnels.tunnels = []storage.AWGTunnel{
+		{ID: "own", Name: "Германия wdtt", WdttClientID: "default",
+			Interface: storage.AWGInterface{PrivateKey: "oldpriv", Address: "10.66.0.4/32"},
+			Peer:      storage.AWGPeer{PublicKey: "srvkey="}},
+		{ID: "manual", Name: "Руками",
+			Interface: storage.AWGInterface{PrivateKey: "другой", Address: "10.66.0.9/32"},
+			Peer:      storage.AWGPeer{PublicKey: "srvkey="}},
+	}
+	tunnels.nextID = "wg-2"
+
+	rr := httptest.NewRecorder()
+	h.EnsureWGTunnel(rr, post(t, ``), rec.Key())
+	data, msg, code := decodeEnvelope(t, rr)
+	if code != "" || data["created"] != true {
+		t.Fatalf("ответ: %v (%s %s)", data, code, msg)
+	}
+	if !reflect.DeepEqual(tunnels.deleted, []string{"own"}) {
+		t.Fatalf("снесены %v (несвязанный трогать нельзя)", tunnels.deleted)
+	}
+	if len(tunnels.saved) != 0 {
+		t.Fatalf("усыновлён туннель с чужим ключом интерфейса: %+v", tunnels.saved)
 	}
 }
 

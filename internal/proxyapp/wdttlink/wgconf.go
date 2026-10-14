@@ -129,18 +129,42 @@ func PatchWgConfEndpoint(conf string, localPort int) string {
 
 // MatchingAWGTunnel finds an existing tunnel with the same WG peer public key.
 // Matching only by peer key avoids adopting an unrelated user tunnel that
-// happens to share a 10.x interface address.
+// happens to share a 10.x interface address. A tunnel with a different
+// interface private key is another peer of the same server (the subscriber
+// was re-created) — adopting it would keep a dead key and address (F139).
 func MatchingAWGTunnel(tunnels []storage.AWGTunnel, wgConf string) *storage.AWGTunnel {
 	key := strings.TrimSpace(ExtractPeerPublicKey(wgConf))
 	if key == "" {
 		return nil
 	}
+	priv := ExtractInterfacePrivateKey(wgConf)
 	for i := range tunnels {
-		if strings.TrimSpace(tunnels[i].Peer.PublicKey) == key {
-			return &tunnels[i]
+		if strings.TrimSpace(tunnels[i].Peer.PublicKey) != key {
+			continue
 		}
+		if stored := strings.TrimSpace(tunnels[i].Interface.PrivateKey); priv != "" && stored != "" && stored != priv {
+			continue
+		}
+		return &tunnels[i]
 	}
 	return nil
+}
+
+// ExtractInterfacePrivateKey returns [Interface] PrivateKey from a WireGuard
+// config snippet, "" if absent.
+func ExtractInterfacePrivateKey(conf string) string {
+	inIface := false
+	for _, line := range strings.Split(conf, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "[") {
+			inIface = strings.EqualFold(t, "[interface]")
+			continue
+		}
+		if k, v, ok := strings.Cut(t, "="); inIface && ok && strings.EqualFold(strings.TrimSpace(k), "PrivateKey") {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // ExtractPeerPublicKey returns [Peer] PublicKey from a WireGuard config snippet.
