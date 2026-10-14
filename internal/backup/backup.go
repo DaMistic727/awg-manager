@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -187,6 +188,9 @@ func Restore(dataDir string, r io.Reader) error {
 	if err := validateStaging(staging); err != nil {
 		return reject(err)
 	}
+	if err := fileOverLiveDir(staging, dataDir); err != nil {
+		return reject(err)
+	}
 	// С этого места данные меняются: отказ оставляет их частично
 	// заменёнными, и об этом надо сказать прямо — лечится повтором.
 	if _, err := clearBackedUp(dataDir, ""); err != nil {
@@ -199,6 +203,28 @@ func Restore(dataDir string, r io.Reader) error {
 		return fmt.Errorf("не удалось записать маркер post-restore: %w", err)
 	}
 	return nil
+}
+
+// fileOverLiveDir — обычный файл архива там, где в каталоге данных сейчас
+// каталог (tunnels, singbox/config.d…), — подлог, обратный F212: владелец
+// каталога потом падает на MkdirAll с ENOTDIR при каждой записи (F655).
+// Сверка с живым каталогом, а не со списком имён: панель, принимающая
+// восстановление, свои каталоги уже создала, и список не устаревает.
+func fileOverLiveDir(staging, dataDir string) error {
+	return filepath.WalkDir(staging, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(staging, p)
+		if err != nil {
+			return err
+		}
+		// Имя из архива в отказ не попадает (F207).
+		if info, err := os.Lstat(filepath.Join(dataDir, rel)); err == nil && info.IsDir() {
+			return fmt.Errorf("%w: файл на месте каталога данных", errNotOurArchive)
+		}
+		return nil
+	})
 }
 
 // clearBackedUp удаляет из root/rel всё, что несёт бэкап, и оставляет то, что

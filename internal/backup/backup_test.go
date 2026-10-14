@@ -998,3 +998,28 @@ func TestShouldSkip_AtomicTempFiles(t *testing.T) {
 		}
 	}
 }
+
+// F655: обычный файл архива на месте каталога данных (tunnels, singbox/
+// config.d) — подлог, обратный F212: владелец каталога падал бы на MkdirAll
+// с ENOTDIR при каждой записи. Данные при отказе не тронуты.
+func TestRestore_RejectsFileOverLiveDirectory(t *testing.T) {
+	for _, name := range []string{"tunnels", "singbox/config.d"} {
+		t.Run(name, func(t *testing.T) {
+			dataDir := filepath.Join(t.TempDir(), "awg-manager")
+			if err := os.MkdirAll(filepath.Join(dataDir, name), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			archive := forgedTar(t, []tar.Header{
+				{Name: ManifestName, Mode: 0o644, Typeflag: tar.TypeReg},
+				{Name: "settings.json", Mode: 0o644, Typeflag: tar.TypeReg},
+				{Name: name, Mode: 0o644, Typeflag: tar.TypeReg},
+			}, []string{validManifestJSON, `{"version":32}`, "x"})
+			if err := Restore(dataDir, bytes.NewReader(archive)); !errors.Is(err, errNotOurArchive) {
+				t.Fatalf("err = %v, ждали отказ «не наш архив»", err)
+			}
+			if info, err := os.Stat(filepath.Join(dataDir, name)); err != nil || !info.IsDir() {
+				t.Fatalf("каталог %s испорчен отказанным восстановлением: %v", name, err)
+			}
+		})
+	}
+}
