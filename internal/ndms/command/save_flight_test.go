@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -613,18 +614,27 @@ func TestSave_FireHoldRace(t *testing.T) {
 				if rel, err := sc.HoldForRemoval(context.Background()); err == nil {
 					rel()
 				}
+				// Уступка планировщику: без неё восемь держателей почти не
+				// оставляют моментов holds == 0, и под нагрузкой полёты не
+				// открывались вовсе (F635). Гонку это не снимает: удержание
+				// по-прежнему берётся в любой точке открытия.
+				runtime.Gosched()
 			}
 		}()
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for opens.Load() < 300 && time.Now().Before(deadline) {
+	// Порог — «гонка реально прогонялась», а не нагрузочный норматив: 300
+	// полётов за 5 с не набирались при load average ~20 (F635). Мутация
+	// (окно между проверкой holds и открытием) ловится 10/10 и в покое, и
+	// под нагрузкой 2×CPU — замерено на пороге 50.
+	deadline := time.Now().Add(10 * time.Second)
+	for opens.Load() < 50 && time.Now().Before(deadline) {
 		sc.Request()
 		time.Sleep(100 * time.Microsecond)
 	}
 	close(stop)
 	wg.Wait()
-	if n := opens.Load(); n < 300 {
-		t.Fatalf("полётов %d за 5 с, ждали 300", n)
+	if n := opens.Load(); n < 50 {
+		t.Fatalf("полётов %d за 10 с, ждали 50", n)
 	}
 	if n := bad.Load(); n != 0 {
 		t.Fatalf("полёт открыт при удержании %d раз", n)

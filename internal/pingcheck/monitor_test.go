@@ -412,7 +412,10 @@ func TestSensorTick_SuccessAfterFailedToggleRecoversFailover(t *testing.T) {
 
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
-	deadline := time.Now().Add(500 * time.Millisecond)
+	// Окно — потолок, а не ожидание: условие проверяется каждые 5 мс и
+	// возвращает сразу. 500 мс не хватало горутине взять лок под -race на
+	// нагруженной машине (F262).
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return

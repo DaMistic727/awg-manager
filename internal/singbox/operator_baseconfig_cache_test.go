@@ -161,7 +161,17 @@ func TestPatchBaseCacheFilePath_WritesAndLogs(t *testing.T) {
 // was == want).
 func TestPatchBaseCacheFilePath_StoreDNSAddedKeepsLiveFile(t *testing.T) {
 	dir := t.TempDir()
-	_, tmpDB := redirectCacheDBPaths(t, dir)
+	redirectCacheDBPaths(t, dir)
+	// store_dns ставится только кэшу в RAM — пути под /tmp/
+	// (router.StoreDNSForCachePath). t.TempDir() лежит вне /tmp при своём
+	// GOTMPDIR, и тест падал от окружения (F616): RAM-путь — явно под /tmp.
+	ram, err := os.MkdirTemp("/tmp", "awgm-cache-test-")
+	if err != nil {
+		t.Skipf("нет записываемого /tmp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(ram) })
+	tmpDB := filepath.Join(ram, "tmp-cache.db")
+	tempCacheDBPath = tmpDB
 	if err := os.WriteFile(tmpDB, []byte("live"), 0o644); err != nil {
 		t.Fatal(err)
 	}
