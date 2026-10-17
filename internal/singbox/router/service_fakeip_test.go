@@ -1295,6 +1295,9 @@ func TestDisableFakeIPTun_DeleteFailureClearsAddresses(t *testing.T) {
 	}
 	mustOrder("Delete:"+ndmsName, "ClearAddress:"+ndmsName)
 	mustOrder("Delete:"+ndmsName, "ClearIPv6Address:"+ndmsName)
+	// Уцелевший интерфейс гасится, но после снятия адресов (F675).
+	mustOrder("ClearAddress:"+ndmsName, "InterfaceDown:"+ndmsName)
+	mustOrder("ClearIPv6Address:"+ndmsName, "InterfaceDown:"+ndmsName)
 }
 
 // ctxCancelOpkgTun simulates real NDMS HTTP behaviour for the rollback-ctx

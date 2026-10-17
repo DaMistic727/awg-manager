@@ -74,8 +74,11 @@ func TestPolicyTunDisable_TeardownOrder(t *testing.T) {
 	mustOrderCalls(t, h.log, "RemoveDefaultRoute:"+ndmsName, "RemoveIPv6DefaultRoute:"+ndmsName)
 	mustOrderCalls(t, h.log, "RemoveIPv6DefaultRoute:"+ndmsName, "Uninstall")
 	// Интерфейс разбирается ПОСЛЕ снятия маршрутов и netfilter-правил.
-	mustOrderCalls(t, h.log, "Uninstall", "InterfaceDown:"+ndmsName)
-	mustOrderCalls(t, h.log, "InterfaceDown:"+ndmsName, "ClearAddress:"+ndmsName)
+	mustOrderCalls(t, h.log, "Uninstall", "ClearAddress:"+ndmsName)
+	// Down — после снятия адресов: down со статическим IPv6 NDMS отвечает
+	// W «reinstall address» (F675).
+	mustOrderCalls(t, h.log, "ClearAddress:"+ndmsName, "InterfaceDown:"+ndmsName)
+	mustOrderCalls(t, h.log, "ClearIPv6Address:"+ndmsName, "InterfaceDown:"+ndmsName)
 
 	// Слот 20 запаркован, а tun-инбаунд вычищен из его конфига — иначе
 	// следующий tproxy-enable переоткрыл бы удалённый tun (ensureTProxyInbound
