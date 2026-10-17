@@ -1091,6 +1091,23 @@ func TestRouterPutSettings_OmittedPool6KeepsStored(t *testing.T) {
 	}
 }
 
+// fakeipTunAddr4: PUT клиента, не знающего поля, не возвращает адрес tun к
+// дефолту (конфликт с WAN) и не роняет правку при поднятом tun.
+func TestRouterPutSettings_OmittedTunAddr4KeepsStored(t *testing.T) {
+	svc := &mockRouterSvc{settings: storage.SingboxRouterSettings{FakeIPTunAddr4: "10.99.0.1/30"}}
+	h := newMockRouterHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/router/settings",
+		strings.NewReader(`{"enabled":true,"wanAutoDetect":true,"fakeipPool6":"","interceptFamily":"ipv4_only"}`))
+	rr := httptest.NewRecorder()
+	h.PutSettings(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+	if svc.settings.FakeIPTunAddr4 != "10.99.0.1/30" {
+		t.Errorf("fakeipTunAddr4 = %q, want сохранённое \"10.99.0.1/30\" (absent ≠ empty)", svc.settings.FakeIPTunAddr4)
+	}
+}
+
 // Обратное направление: явное "" доходит до сервиса как "" (осознанное
 // выключение). На уровне handler'а это СТРАХОВКА (decode и сегодня отдаёт ""),
 // краснота выключения целиком — сквозной тест роутера.

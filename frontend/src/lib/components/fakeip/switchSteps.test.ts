@@ -155,6 +155,36 @@ describe('deriveSteps — failure', () => {
 		expect(got[1]).toBe('error');
 		expect(got.slice(2)).toEqual(['pending', 'pending', 'pending', 'pending']);
 	});
+
+	it('off→ source skips teardown: error lands on the failing milestone, not on teardown', () => {
+		// Из «Выключен» бэкенд teardown не шлёт — снимать нечего. Последовательность
+		// снята со стенда (KN-1810, конфликт адреса tun с Bridge0).
+		const got = deriveSteps(
+			'off',
+			'policy-tun',
+			[
+				ev('start', 'current'),
+				ev('provision', 'error'),
+				ev('error', 'error'),
+				ev('rollback', 'done'),
+			],
+			{ failed: true },
+		).map((s) => s.state);
+		expect(got).toEqual(['done', 'error', 'pending', 'pending', 'pending', 'pending']);
+	});
+
+	it('→tproxy readiness error leaves the later provision row pending (row order ≠ milestone order)', () => {
+		// У tproxy строка provision (iptables) идёт ПОСЛЕ readiness.
+		for (const from of ['off', 'fakeip-tun'] as const) {
+			const got = deriveSteps(
+				from,
+				'tproxy',
+				[ev('readiness', 'error'), ev('rollback', 'done')],
+				{ failed: true },
+			).map((s) => s.state);
+			expect(got).toEqual(['done', 'error', 'pending', 'pending']);
+		}
+	});
 });
 
 describe('deriveSteps — disable direction', () => {

@@ -390,7 +390,7 @@ func (s *ServiceImpl) fakeIPReadyInputs() (iface, dnsAddr string, fakeipNet neti
 		return "", "", netip.Prefix{}, false
 	}
 	iface = tunIfaceName(st.Index)
-	dnsAddr, err = DeriveTunDNS(s.deps.FakeIPTun.TunAddr4)
+	dnsAddr, err = DeriveTunDNS(s.resolveFakeIPParams(settings.SingboxRouter).TunAddr4)
 	if err != nil {
 		return "", "", netip.Prefix{}, false
 	}
@@ -1693,10 +1693,11 @@ func (s *ServiceImpl) GetStatus(ctx context.Context) (Status, error) {
 	if fakeIPSt, ok := opkgTunOwned(settings, stateFakeIPTun); sr.RoutingMode == "fakeip-tun" &&
 		ok && fakeIPSt.Provisioned {
 		fakeIPIface = tunIfaceName(fakeIPSt.Index)
-		if d, derr := DeriveTunDNS(s.deps.FakeIPTun.TunAddr4); derr == nil {
+		tunAddr4 := s.resolveFakeIPParams(sr).TunAddr4
+		if d, derr := DeriveTunDNS(tunAddr4); derr == nil {
 			fakeIPDns = d
 		}
-		if addr, _, aerr := splitCIDRToAddrMask(s.deps.FakeIPTun.TunAddr4); aerr == nil {
+		if addr, _, aerr := splitCIDRToAddrMask(tunAddr4); aerr == nil {
 			fakeIPTunAddr = addr
 		}
 	}
@@ -1794,6 +1795,7 @@ func (s *ServiceImpl) GetStatus(ctx context.Context) (Status, error) {
 		FakeIPIface:             fakeIPIface,
 		FakeIPDns:               fakeIPDns,
 		FakeIPTunAddr:           fakeIPTunAddr,
+		TunAddrLocked:           tunAddrLocked(settings),
 		CacheDBPath:             cacheDBPath,
 		PolicyTunIface:          policyTunIface,
 		PolicyTunNDMSName:       policyTunNDMS,

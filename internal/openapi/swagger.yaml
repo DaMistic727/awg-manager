@@ -5627,6 +5627,12 @@ definitions:
         - system
         example: ""
         type: string
+      fakeipTunAddr4:
+        description: |-
+          FakeIPTunAddr4 is the OpkgTun address of both tun modes, a /30 host
+          (default "172.18.0.1/30"). Changeable only while the mode is off.
+        example: 172.18.0.1/30
+        type: string
       ingressInterfaces:
         description: |-
           IngressInterfaces lists interface refs whose ingress traffic is
@@ -5846,6 +5852,11 @@ definitions:
         type: boolean
       tproxyTargetAvailable:
         example: true
+        type: boolean
+      tunAddrLocked:
+        description: 'TunAddrLocked — fakeipTunAddr4 сейчас не меняется: OpkgTun tun-режима
+          поднят.'
+        example: false
         type: boolean
       xtDscpAvailable:
         description: |-
@@ -8840,6 +8851,13 @@ definitions:
           дефолт. Legacy-значения "gvisor", "system", "mixed" пишутся дословно:
           1.15 принимает их с deprecation-warning, 1.16 потребует
           ENABLE_DEPRECATED_TUN_STACK=true, 1.17 удалит.
+        type: string
+      fakeipTunAddr4:
+        description: |-
+          FakeIPTunAddr4 — адрес OpkgTun обоих tun-режимов, хост /30 (default
+          "172.18.0.1/30"); второй хост /30 — DNS туннеля. Пересечение с сетями
+          интерфейсов роутера — забота пользователя; меняется только при
+          выключенном режиме (ErrTunAddrLocked).
         type: string
       ingressInterfaces:
         description: |-

@@ -124,6 +124,16 @@ func (s *ServiceImpl) UpdateSettings(ctx context.Context, sr storage.SingboxRout
 			if len(normalized.BypassGeoIPTags) > 0 && len(cur.SingboxRouter.BypassGeoIPTags) == 0 && !ipsetOK {
 				return bypassset.ErrIPSetNotAvailable
 			}
+			// Адрес живого tun не перевыпускается: старый остался бы на
+			// интерфейсе, а drift-heal дописал бы новый рядом. В записи на
+			// диске пусто = дефолт (поле моложе записи).
+			curTun := cur.SingboxRouter.FakeIPTunAddr4
+			if curTun == "" {
+				curTun = DefaultFakeIPTunParams().TunAddr4
+			}
+			if normalized.FakeIPTunAddr4 != curTun && tunAddrLocked(cur) {
+				return ErrTunAddrLocked
+			}
 			// Port-slot stability: the UI contract carries no slot field, so incoming
 			// classes are re-associated with their persisted slots by DSCP before the
 			// save — otherwise every PUT would re-deal ports positionally and RST
@@ -354,6 +364,14 @@ func normalizeFakeIPSettings(sr *storage.SingboxRouterSettings) error {
 	}
 	if sr.FakeIPMTU == 0 {
 		sr.FakeIPMTU = def.MTU
+	}
+	if sr.FakeIPTunAddr4 == "" {
+		sr.FakeIPTunAddr4 = def.TunAddr4
+	}
+	// DeriveTunDNS — та же проверка, на которой иначе упало бы включение:
+	// IPv4, /30, адрес хоста.
+	if _, err := DeriveTunDNS(sr.FakeIPTunAddr4); err != nil {
+		return fmt.Errorf("fakeipTunAddr4: %w", err)
 	}
 	// v4 pool must parse as an IPv4 prefix.
 	if p, err := netip.ParsePrefix(sr.FakeIPPool4); err != nil {

@@ -39,6 +39,8 @@ type SingboxRouterStatusData struct {
 	FakeIPIface            string `json:"fakeipIface,omitempty" example:"opkgtun0"`
 	FakeIPDns              string `json:"fakeipDns,omitempty" example:"172.18.0.2"`
 	FakeIPTunAddr          string `json:"fakeipTunAddr,omitempty" example:"172.18.0.1"`
+	// TunAddrLocked — fakeipTunAddr4 сейчас не меняется: OpkgTun tun-режима поднят.
+	TunAddrLocked bool `json:"tunAddrLocked,omitempty" example:"false"`
 	// CacheDBPath — эффективный путь cache.db: по cacheFileLocation, при пустой
 	// настройке — из 00-base.json (рукописный путь сохраняется).
 	CacheDBPath string `json:"cacheDbPath,omitempty" example:"/opt/etc/awg-manager/singbox/cache.db"`
@@ -123,6 +125,9 @@ type SingboxRouterSettingsData struct {
 	// Explicit "" disables v6; an OMITTED field keeps the stored value
 	// (absent != empty — the handler substitutes the current setting).
 	FakeIPPool6 string `json:"fakeipPool6,omitempty" example:"fc00::/18"`
+	// FakeIPTunAddr4 is the OpkgTun address of both tun modes, a /30 host
+	// (default "172.18.0.1/30"). Changeable only while the mode is off.
+	FakeIPTunAddr4 string `json:"fakeipTunAddr4,omitempty" example:"172.18.0.1/30"`
 	// FakeIPMTU is the tun MTU (default 1500; valid range 576-9000).
 	FakeIPMTU int `json:"fakeipMtu,omitempty" example:"1500"`
 	// FakeIPRealServer is the upstream resolver the engine-managed "real" DNS

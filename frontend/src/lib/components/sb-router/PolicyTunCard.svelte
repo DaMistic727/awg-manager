@@ -17,6 +17,7 @@
   import { untrack } from 'svelte';
   import IssueRow from './IssueRow.svelte';
   import PolicyCombobox from './PolicyCombobox.svelte';
+  import { DEFAULT_TUN_ADDR } from './tunAddr';
   import type {
     TunStack,
     PolicyTunNATEgress,
@@ -255,7 +256,7 @@
 
   {#if !wanted}
     <p class="hint">
-      {m.sb_router_policy_tun_preserve_off_hint()}
+      {m.sb_router_policy_tun_preserve_off_hint({ addr: (cfg.fakeipTunAddr4 || DEFAULT_TUN_ADDR).split('/')[0] })}
     </p>
   {:else}
     <p class="hint">

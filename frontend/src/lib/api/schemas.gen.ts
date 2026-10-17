@@ -1927,6 +1927,7 @@ const api_SingboxRouterSettingsData: v.GenericSchema = v.looseObject({
 	fakeipPool6: v.optional(v.nullable(v.string())),
 	fakeipRealServer: v.optional(v.nullable(v.string())),
 	fakeipStack: v.optional(v.nullable(v.string())),
+	fakeipTunAddr4: v.optional(v.nullable(v.string())),
 	ingressInterfaces: v.optional(v.nullable(v.array(v.string()))),
 	interceptFamily: v.optional(v.nullable(v.string())),
 	policyName: v.optional(v.nullable(v.string())),
@@ -1977,6 +1978,7 @@ const api_SingboxRouterStatusData: v.GenericSchema = v.looseObject({
 	ruleSetCount: v.optional(v.nullable(v.number())),
 	snifferEnabled: v.optional(v.nullable(v.boolean())),
 	tproxyTargetAvailable: v.optional(v.nullable(v.boolean())),
+	tunAddrLocked: v.optional(v.nullable(v.boolean())),
 	xtDscpAvailable: v.optional(v.nullable(v.boolean())),
 });
 

@@ -88,6 +88,11 @@ var (
 	// отказываем, клиент повторит после завершения перехода.
 	ErrTransitionInProgress = errors.New("смена режима роутинга выполняется — повторите после её завершения")
 
+	// ErrTunAddrLocked rejects a fakeipTunAddr4 change while a tun mode
+	// (fakeip-tun / policy-tun) holds a provisioned OpkgTun: the address is
+	// applied only on enable.
+	ErrTunAddrLocked = errors.New("адрес tun меняется только при выключенном режиме")
+
 	// ErrDNSChainTagReserved rejects a user DNS rule that claims (or references)
 	// the awgm-dns-* tag namespace owned by the DNS-preset overlay: such a rule
 	// would be wiped by the next ensureDNSChainOverlay. Mapped to 400 by the API.

@@ -51,6 +51,9 @@ export interface SingboxRouterSettings {
 	fakeipStack?: TunStack;
 	fakeipPool4?: string;
 	fakeipPool6?: string;
+	// Адрес OpkgTun обоих tun-режимов, хост /30 (default "172.18.0.1/30").
+	// Меняется только при выключенном режиме (TUN_ADDR_LOCKED).
+	fakeipTunAddr4?: string;
 	fakeipMtu?: number;
 	// Upstream резолвера "real" (default "1.1.1.1"). Правится через адрес
 	// сервера «real» в DNS-панели fakeip (бэкенд перехватывает правку в это
@@ -195,6 +198,8 @@ export interface SingboxRouterStatus {
 	fakeipDns?: string;
 	/** Адрес tun-шлюза (хост /30, e.g. «172.18.0.1») в режиме fakeip-tun. */
 	fakeipTunAddr?: string;
+	/** Смена fakeipTunAddr4 сейчас отвергается: OpkgTun tun-режима поднят. */
+	tunAddrLocked?: boolean;
 	/** Эффективный путь cache.db: по cacheFileLocation, при пустой настройке — из 00-base.json. */
 	cacheDbPath?: string;
 	/**

@@ -44,6 +44,10 @@ type Status struct {
 	// FakeIPTunAddr is the fakeip-tun gateway address (the tun /30 host, e.g.
 	// "172.18.0.1"); "" when not in fakeip-tun mode. Read-only, for display.
 	FakeIPTunAddr string `json:"fakeipTunAddr,omitempty"`
+	// TunAddrLocked — смена settings.fakeipTunAddr4 сейчас отвергается
+	// (ErrTunAddrLocked): OpkgTun какого-либо tun-режима поднят. Тот же
+	// признак, что у гарда UpdateSettings (tunAddrLocked).
+	TunAddrLocked bool `json:"tunAddrLocked,omitempty"`
 	// CacheDBPath — эффективный путь cache.db (issue #842): по настройке, а при
 	// пустой — из 00-base.json. Показывает рукописный путь, который селектор
 	// «flash | tmp» выразить не может. "" без шва Deps.CacheDBPath.

@@ -150,3 +150,73 @@ func TestUpdateSettings_PersistFailureRollsBackCacheLocation(t *testing.T) {
 		t.Fatalf("вызовы шва = %v, ждали %v (применение, затем откат)", applied, want)
 	}
 }
+
+// 6) Адрес tun: пусто → дефолт, не-/30 и адрес сети отвергаются.
+func TestNormalizeSettings_FakeIPTunAddr4(t *testing.T) {
+	sr, err := NormalizeSingboxRouterSettings(storage.SingboxRouterSettings{WANAutoDetect: true})
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if sr.FakeIPTunAddr4 != DefaultFakeIPTunParams().TunAddr4 {
+		t.Fatalf("дефолт не подставлен: %q", sr.FakeIPTunAddr4)
+	}
+	for _, bad := range []string{"10.99.0.1/24", "10.99.0.0/30", "10.99.0.3/30", "fd00::1/126", "junk"} {
+		if _, err := NormalizeSingboxRouterSettings(storage.SingboxRouterSettings{WANAutoDetect: true, FakeIPTunAddr4: bad}); err == nil {
+			t.Errorf("%q принят", bad)
+		}
+	}
+	p := resolveFakeIPParamsWith(DefaultFakeIPTunParams(),
+		storage.SingboxRouterSettings{FakeIPTunAddr4: "10.99.0.1/30"}, "")
+	if p.TunAddr4 != "10.99.0.1/30" {
+		t.Fatalf("настройка не применена: %q", p.TunAddr4)
+	}
+}
+
+// 7) Смена адреса tun при поднятом OpkgTun отвергается; при удержанной
+// (Provisioned=false) записи и без записи — проходит.
+func TestUpdateSettings_TunAddrLockedWhileProvisioned(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		st      *storage.OpkgTunState
+		blocked bool
+	}{
+		{"provisioned", &storage.OpkgTunState{Mode: storage.OpkgTunModePolicyTun, Provisioned: true}, true},
+		{"held", &storage.OpkgTunState{Mode: storage.OpkgTunModePolicyTun}, false},
+		{"none", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTransitionHarness(t)
+			ctx := context.Background()
+			if err := h.store.Update(func(cur *storage.Settings) error { cur.OpkgTun = tc.st; return nil }); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			sr, err := h.svc.GetSettings(ctx)
+			if err != nil {
+				t.Fatalf("GetSettings: %v", err)
+			}
+			if st, err := h.svc.GetStatus(ctx); err != nil {
+				t.Fatalf("GetStatus: %v", err)
+			} else if st.TunAddrLocked != tc.blocked {
+				t.Fatalf("status.tunAddrLocked=%v, ожидали %v", st.TunAddrLocked, tc.blocked)
+			}
+			def := sr.FakeIPTunAddr4
+			sr.FakeIPTunAddr4 = "10.99.0.1/30"
+			err = h.svc.UpdateSettings(ctx, sr)
+			if got := errors.Is(err, ErrTunAddrLocked); got != tc.blocked {
+				t.Fatalf("ErrTunAddrLocked=%v, ожидали %v (err=%v)", got, tc.blocked, err)
+			}
+			saved, _ := h.store.Load()
+			if (saved.SingboxRouter.FakeIPTunAddr4 == "10.99.0.1/30") == tc.blocked {
+				t.Fatalf("сохранено %q при blocked=%v", saved.SingboxRouter.FakeIPTunAddr4, tc.blocked)
+			}
+			if tc.blocked {
+				// Тот же адрес при поднятом tun — не смена (запись выше не
+				// тронута: отказ случился до Reconcile).
+				sr.FakeIPTunAddr4 = def
+				if err := h.svc.UpdateSettings(ctx, sr); errors.Is(err, ErrTunAddrLocked) {
+					t.Fatal("отказ без смены адреса")
+				}
+			}
+		})
+	}
+}

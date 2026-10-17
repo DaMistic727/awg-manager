@@ -204,11 +204,18 @@ export function deriveSteps(
 	const failed = opts.failed === true || hasErrorEvent;
 	let errorAssigned = false;
 
-	return defs.map((def): UIStep => {
+	// Ошибка на милстоуне X значит, что бэкенд прошёл строки, стоящие ДО первой
+	// строки X, даже если о них события не было: из «Выключен» teardown не
+	// шлётся — снимать нечего, и без этого ошибка садилась на строку «Снят
+	// предыдущий режим». Именно порядок строк, а не ранг милстоуна: у tproxy
+	// строка provision стоит после readiness.
+	const errorRow = defs.findIndex((d) => status.get(d.milestone) === 'error');
+
+	return defs.map((def, i): UIStep => {
 		const r = rank(def.milestone);
 		const liveMessage = messages.get(def.milestone);
 
-		const isDone = r <= maxDoneRank;
+		const isDone = r <= maxDoneRank || i < errorRow;
 		if (isDone) {
 			return { ...def, state: 'done', liveMessage };
 		}

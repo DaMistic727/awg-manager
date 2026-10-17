@@ -30,6 +30,14 @@ func opkgTunOwned(settings *storage.Settings, mode string) (*storage.OpkgTunStat
 	return &cp, true
 }
 
+// tunAddrLocked — адрес tun сейчас не меняется: OpkgTun любого tun-режима
+// поднят, и новый адрес лёг бы рядом со старым (drift-heal). Provisioned=true
+// бывает и при Enabled=false (вердикт владения unknown, F518) — адрес в ядре
+// тогда тоже может жить.
+func tunAddrLocked(settings *storage.Settings) bool {
+	return settings != nil && settings.OpkgTun != nil && settings.OpkgTun.Provisioned
+}
+
 // natSegmentsOf — nil-safe чтение policy-payload записи (в т.ч. чужого Mode:
 // артефакт миграции v34 хранит NAT-записи на fakeip-записи).
 func natSegmentsOf(st *storage.OpkgTunState) []storage.PolicyTunNATSegment {

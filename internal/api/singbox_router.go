@@ -170,17 +170,22 @@ func (h *SingboxRouterHandler) PutSettings(w http.ResponseWriter, r *http.Reques
 	//
 	// interceptFamily — тот же узор: клиент, не знающий поля (старый фронтенд,
 	// скрипт), прислал бы "" и молча выключил перехват IPv6.
+	//
+	// fakeipTunAddr4 — тоже: "" нормализуется в дефолт, и такой клиент молча
+	// вернул бы адрес, конфликтующий с WAN, а при поднятом tun уронил бы
+	// любую правку настроек отказом TUN_ADDR_LOCKED.
 	var body struct {
 		storage.SingboxRouterSettings
 		FakeIPPool6     *string `json:"fakeipPool6"`
 		InterceptFamily *string `json:"interceptFamily"`
+		FakeIPTunAddr4  *string `json:"fakeipTunAddr4"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		response.BadRequest(w, err.Error())
 		return
 	}
 	sr := body.SingboxRouterSettings
-	if body.FakeIPPool6 == nil || body.InterceptFamily == nil {
+	if body.FakeIPPool6 == nil || body.InterceptFamily == nil || body.FakeIPTunAddr4 == nil {
 		// Absent = не менять: подставляем текущее значение (нормализация
 		// возвращает pool6 дословно, включая "").
 		cur, err := h.svc.GetSettings(r.Context())
@@ -190,12 +195,16 @@ func (h *SingboxRouterHandler) PutSettings(w http.ResponseWriter, r *http.Reques
 		}
 		sr.FakeIPPool6 = cur.FakeIPPool6
 		sr.InterceptFamily = cur.InterceptFamily
+		sr.FakeIPTunAddr4 = cur.FakeIPTunAddr4
 	}
 	if body.FakeIPPool6 != nil {
 		sr.FakeIPPool6 = *body.FakeIPPool6
 	}
 	if body.InterceptFamily != nil {
 		sr.InterceptFamily = *body.InterceptFamily
+	}
+	if body.FakeIPTunAddr4 != nil {
+		sr.FakeIPTunAddr4 = *body.FakeIPTunAddr4
 	}
 	if err := h.svc.UpdateSettings(r.Context(), sr); err != nil {
 		h.handleErr(w, "request", err)
@@ -270,6 +279,8 @@ func (h *SingboxRouterHandler) handleErr(w http.ResponseWriter, action string, e
 		response.Error(w, err.Error(), "BULK_INVALID_SELECTION")
 	case errors.Is(err, router.ErrTransitionInProgress):
 		response.Error(w, err.Error(), "TRANSITION_IN_PROGRESS")
+	case errors.Is(err, router.ErrTunAddrLocked):
+		response.Error(w, err.Error(), "TUN_ADDR_LOCKED")
 	case errors.Is(err, router.ErrCompositeMemberUnknown):
 		// 400: member-тег композита не существует ни в одном каталоге (#567).
 		response.Error(w, err.Error(), "COMPOSITE_MEMBER_UNKNOWN")

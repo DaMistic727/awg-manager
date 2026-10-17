@@ -26,6 +26,7 @@
   import TrafficSourceSettings from './TrafficSourceSettings.svelte';
   import QosSettingsCard from './QosSettingsCard.svelte';
   import PolicyTunCard from './PolicyTunCard.svelte';
+  import TunAddrSection from './TunAddrSection.svelte';
   import BypassGeoIPTags from './BypassGeoIPTags.svelte';
   import OutboundOption from './OutboundOption.svelte';
   import { deriveDeps, deriveIssues } from './drawerData';
@@ -406,6 +407,12 @@
         <p class="hint">{sourceSummary}</p>
         <Button variant="ghost" size="sm" onclick={goToSourceSettings}>{m.sb_router_status_configure_source()}</Button>
       </section>
+    {/if}
+
+    <!-- Адрес tun — общий для fakeip-tun и policy-tun, поэтому вне карточек
+         режимов: менять его можно только при выключенном режиме. -->
+    {#if cfg}
+      <TunAddrSection {cfg} status={s} onPatch={(patch) => applyPatch(patch)} />
     {/if}
 
     <!-- Кэш sing-box (issue #842): единственное место настройки, вне expert-гейта —

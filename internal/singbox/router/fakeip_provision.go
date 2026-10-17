@@ -200,6 +200,9 @@ func resolveFakeIPParamsWith(base FakeIPTunParams, sr storage.SingboxRouterSetti
 	if sr.FakeIPPool6 == "" {
 		p.TunAddr6 = ""
 	}
+	if sr.FakeIPTunAddr4 != "" {
+		p.TunAddr4 = sr.FakeIPTunAddr4
+	}
 	if sr.FakeIPMTU != 0 {
 		p.MTU = sr.FakeIPMTU
 	}

@@ -292,6 +292,11 @@ type SingboxRouterSettings struct {
 	FakeIPPool4 string `json:"fakeipPool4,omitempty"`
 	// FakeIPPool6 is the fakeip v6 pool CIDR (default "fc00::/18"); "" disables v6.
 	FakeIPPool6 string `json:"fakeipPool6,omitempty"`
+	// FakeIPTunAddr4 — адрес OpkgTun обоих tun-режимов, хост /30 (default
+	// "172.18.0.1/30"); второй хост /30 — DNS туннеля. Пересечение с сетями
+	// интерфейсов роутера — забота пользователя; меняется только при
+	// выключенном режиме (ErrTunAddrLocked).
+	FakeIPTunAddr4 string `json:"fakeipTunAddr4,omitempty"`
 	// FakeIPMTU is the tun MTU (default 1500).
 	FakeIPMTU int `json:"fakeipMtu,omitempty"`
 	// FakeIPRealServer is the true upstream resolver the engine-managed "real"
