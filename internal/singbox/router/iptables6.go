@@ -350,6 +350,7 @@ func buildMangleRestoreInput6(spec V6Spec) string {
 	}
 	emitGenericTProxy6(&b, "-p udp", spec)
 	emitJumps6(&b, Chain6Name, spec, true)
+	emitSelfLoopDrop(&b)
 	b.WriteString("COMMIT\n")
 	return b.String()
 }
@@ -872,6 +873,9 @@ func (it *IPTables) drainFwmarkRules6(ctx context.Context) {
 func (it *IPTables) removeJumps6(ctx context.Context) {
 	it.removeJumps6FromTable(ctx, "mangle", Chain6Name)
 	it.removeJumps6FromTable(ctx, "nat", Redirect6Chain)
+	// Self-loop DROP в mangle INPUT: restore идёт с --noflush, без сноса копии
+	// копились бы на каждом Install6.
+	removeCommentTaggedRules(ctx, it.v6.RunOutput, it.v6.Run, "mangle", "INPUT", SelfLoopTag)
 }
 
 func (it *IPTables) removeJumps6FromTable(ctx context.Context, table, chain string) {
@@ -982,6 +986,13 @@ scrub_jumps() {
     | sed 's/-A PREROUTING/-D PREROUTING/' \
     | while IFS= read -r line; do "$IP6T" -w -t "$1" $line 2>/dev/null; done
 }
+# scrub_tagged <table> <tag> <chain>: удалить правила с комментарием <tag>.
+scrub_tagged() {
+  "$IP6T" -w -t "$1" -S "$3" 2>/dev/null \
+    | grep -E -- "--comment \"?$2" \
+    | sed "s/-A $3/-D $3/" \
+    | while IFS= read -r line; do "$IP6T" -w -t "$1" $line 2>/dev/null; done
+}
 # table_ok <table> <chain>: цепочка существует И в неё входят из PREROUTING.
 table_ok() {
   "$IP6T" -w -t "$1" -nL "$2" >/dev/null 2>&1 \
@@ -995,6 +1006,7 @@ if pidof sing-box >/dev/null 2>&1; then
   [ -f %[1]q ] || exit 0
   if [ "$table" = "mangle" ] && ! table_ok mangle %[3]s && [ -f %[5]q ]; then
     scrub_jumps mangle %[3]s
+    scrub_tagged mangle %[18]s INPUT
     %[7]s --noflush < %[5]q
     %[8]s -6 rule del fwmark 0x%[9]x table %[10]d 2>/dev/null
     %[8]s -6 rule add fwmark 0x%[9]x table %[10]d priority %[11]d 2>/dev/null || true
@@ -1021,7 +1033,7 @@ exit 0
 		netfilter6MangleRulesPath, netfilter6NatRulesPath, sysiptables.RestoreBinary6,
 		ipBinary, Fwmark, RoutingTable, IPRule6Priority,
 		bypassSave6Path, bypassset.SetName6, bypassset.SetMaxElem,
-		Blackhole6Chain, netfilter6BlackholePath, netfilterCtClean6Path)
+		Blackhole6Chain, netfilter6BlackholePath, netfilterCtClean6Path, SelfLoopTag)
 }
 
 // conntrackBinary — conntrack-tools из Entware; тот же путь, что в ctclean.

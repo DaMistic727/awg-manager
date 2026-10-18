@@ -661,3 +661,31 @@ func TestBuildNatRestoreInput_DNSRescueUnchanged(t *testing.T) {
 		t.Error("в режиме «все устройства» DNS-RESCUE не эмитится")
 	}
 }
+
+// F677 в v6: тот же DROP в ip6tables mangle INPUT, снос по тегу на Install6 и
+// Uninstall6 (restore идёт с --noflush) и в хуке перед восстановлением mangle.
+func TestSelfLoopDrop6(t *testing.T) {
+	mangle := buildMangleRestoreInput6(testV6Spec())
+	for _, line := range selfLoopDropLines() {
+		if !strings.Contains(mangle, line) {
+			t.Errorf("нет %q:\n%s", line, mangle)
+		}
+	}
+
+	line := `-A INPUT -p tcp --dport 51273 -m conntrack ! --ctstate DNAT -m comment --comment "` + SelfLoopTag + `" -j DROP`
+	del := append([]string{"-t", "mangle"}, strings.Fields("-D"+strings.TrimPrefix(line, "-A"))...)
+	for name, run := range map[string]func(*IPTables){
+		"Install6":   func(it *IPTables) { _ = it.Install6(context.Background(), testV6Spec()) },
+		"Uninstall6": func(it *IPTables) { it.Uninstall6(context.Background()) },
+	} {
+		fe := &v6Exec{dump: v6JumpsDump() + line + "\n"}
+		run(newV6IPTables(fe))
+		if !hasCall(fe.ip6t, del...) {
+			t.Errorf("%s не снял self-loop DROP: %v", name, fe.ip6t)
+		}
+	}
+
+	if !strings.Contains(netfilter6HookScript(), "scrub_tagged mangle "+SelfLoopTag+" INPUT") {
+		t.Error("v6-хук не чистит self-loop DROP перед restore mangle")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -619,16 +620,24 @@ func emitPreroutingJump(b *strings.Builder, chain string, spec RestoreInputSpec)
 	}
 }
 
-// emitSelfLoopDrop рендерит DROP соединений на порты redirect-инбаундов в обход
-// NAT REDIRECT (см. SelfLoopTag). Во всех режимах: правило без слушателя на
-// порту ничего не стоит, а режимы с классами QoS слушают свои порты.
-func emitSelfLoopDrop(b *strings.Builder, spec RestoreInputSpec) {
-	ports := []int{RedirectPort}
-	for _, q := range spec.QoSClasses {
-		ports = append(ports, q.RedirectPort)
+// selfLoopPorts — TCP-порты всех redirect-инбаундов обоих семейств: основные и
+// диапазоны классов QoS. Набор один на iptables и ip6tables: v6-инбаунды слушают
+// двухстековый `::`, и по IPv4 петля через них заводится так же (стенд 18.10).
+// Правило без слушателя на порту ничего не стоит, поэтому без оглядки на режим.
+func selfLoopPorts() []string {
+	return []string{
+		strconv.Itoa(RedirectPort),
+		strconv.Itoa(Redirect6Port),
+		fmt.Sprintf("%d:%d", QoSRedirectPortBase, QoSRedirectPortBase+MaxQoSClasses-1),
+		fmt.Sprintf("%d:%d", QoS6RedirectPortBase, QoS6RedirectPortBase+MaxQoSClasses-1),
 	}
-	for _, p := range ports {
-		fmt.Fprintf(b, "-A INPUT -p tcp --dport %d -m conntrack ! --ctstate DNAT -m comment --comment %q -j DROP\n",
+}
+
+// emitSelfLoopDrop рендерит DROP соединений на порты redirect-инбаундов в обход
+// NAT REDIRECT (см. SelfLoopTag). Синтаксис общий для iptables и ip6tables.
+func emitSelfLoopDrop(b *strings.Builder) {
+	for _, p := range selfLoopPorts() {
+		fmt.Fprintf(b, "-A INPUT -p tcp --dport %s -m conntrack ! --ctstate DNAT -m comment --comment %q -j DROP\n",
 			p, SelfLoopTag)
 	}
 }
@@ -713,7 +722,7 @@ func buildMangleRestoreInput(spec RestoreInputSpec) string {
 	// set_chain_rules (`INTERCEPT_DNS_ENABLE=1` branch). No extras.
 	b.WriteString("*mangle\n")
 	fmt.Fprintf(&b, ":%s - [0:0]\n", ChainName)
-	emitSelfLoopDrop(&b, spec)
+	emitSelfLoopDrop(&b)
 
 	// ipv6_only: цепочка пустая, остаётся только джамп (см. V4Off).
 	if spec.V4Off {
@@ -1529,7 +1538,12 @@ func (it *IPTables) removeCommentTaggedRulesFromTable(ctx context.Context, table
 	// Разбор идёт через ШОВ роли (runIPTablesOut), а не прямым sysexec: иначе
 	// снос невидим тесту, и его выпил остаётся зелёным. "-w" добавляет сам
 	// sysiptables.RunOutput.
-	out, err := it.runIPTablesOut(ctx, "-t", table, "-S", chain)
+	removeCommentTaggedRules(ctx, it.runIPTablesOut, it.runIPTables, table, chain, tag)
+}
+
+// removeCommentTaggedRules — общий для iptables и ip6tables снос по тегу.
+func removeCommentTaggedRules(ctx context.Context, runOut runOutFn, run runFn, table, chain, tag string) {
+	out, err := runOut(ctx, "-t", table, "-S", chain)
 	if err != nil {
 		return
 	}
@@ -1542,7 +1556,7 @@ func (it *IPTables) removeCommentTaggedRulesFromTable(ctx context.Context, table
 		}
 		delLine := "-D " + strings.TrimPrefix(line, "-A ")
 		args := append([]string{"-t", table}, strings.Fields(delLine)...)
-		_ = it.runIPTables(ctx, args...)
+		_ = run(ctx, args...)
 	}
 }
 

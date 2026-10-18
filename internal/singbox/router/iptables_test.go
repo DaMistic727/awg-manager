@@ -2490,29 +2490,34 @@ func TestTProxyTargetProbeDefault_IsRealProbe(t *testing.T) {
 	}
 }
 
+// selfLoopDropLines — ожидаемые строки DROP на все redirect-порты обоих
+// семейств. Порты выписаны литералами, а не из selfLoopPorts: тест обязан
+// упасть, если из набора выпадет порт.
+func selfLoopDropLines() []string {
+	var out []string
+	for _, p := range []string{"51272", "51273", "51301:51308", "51361:51368"} {
+		out = append(out, fmt.Sprintf(`-A INPUT -p tcp --dport %s -m conntrack ! --ctstate DNAT -m comment --comment "%s" -j DROP`, p, SelfLoopTag))
+	}
+	return out
+}
+
 // F677: соединение на порт redirect-инбаунда без NAT REDIRECT зацикливает
 // sing-box (direct → тот же слушатель). DROP обязан быть в каждом режиме и на
-// каждом redirect-порту, включая классы QoS, и только для не-DNAT соединений.
+// каждом redirect-порту обоих семейств: v6-инбаунды слушают двухстековый `::`,
+// и по IPv4 петля через 51273 заводится так же (стенд 18.10).
 func TestBuildRestoreInput_SelfLoopDrop(t *testing.T) {
-	drop := func(port int) string {
-		return fmt.Sprintf(`-A INPUT -p tcp --dport %d -m conntrack ! --ctstate DNAT -m comment --comment "%s" -j DROP`, port, SelfLoopTag)
-	}
-	qos := qosTestSpec()
-	dscp := qos
+	dscp := qosTestSpec()
 	dscp.DSCPOnly = true
 	for name, spec := range map[string]RestoreInputSpec{
 		"policy":   {PolicyMark: "0xffffaaa"},
 		"v4off":    {PolicyMark: "0xffffaaa", V4Off: true},
-		"qos":      qos,
+		"qos":      qosTestSpec(),
 		"dscpOnly": dscp,
 	} {
 		mangle := buildMangleRestoreInput(spec)
-		if !strings.Contains(mangle, drop(RedirectPort)) {
-			t.Errorf("%s: нет DROP на %d:\n%s", name, RedirectPort, mangle)
-		}
-		for _, q := range spec.QoSClasses {
-			if !strings.Contains(mangle, drop(q.RedirectPort)) {
-				t.Errorf("%s: нет DROP на порт класса %d:\n%s", name, q.RedirectPort, mangle)
+		for _, line := range selfLoopDropLines() {
+			if !strings.Contains(mangle, line) {
+				t.Errorf("%s: нет %q:\n%s", name, line, mangle)
 			}
 		}
 	}
