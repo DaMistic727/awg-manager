@@ -62,8 +62,9 @@ const (
 	// Выбрана вдали от чужих диапазонов: 100 — таблица fwmark-правила tproxy,
 	// 400-599 занимает clientroute, политики NDMS живут в низких номерах.
 	fakeIPIngressTable = 700
-	// fakeIPIngressPriority — приоритет iif-правил. Ниже tproxy-правила
-	// (IPRulePriority=30000) и выше системных main/default (32766/32767);
+	// fakeIPIngressPriority — приоритет iif-правил. Выше системных
+	// main/default (32766/32767); tproxy-правило (IPRulePriority) стоит
+	// раньше, но матчит только fwmark TPROXY, которого в fakeip-tun нет;
 	// таблица local (0) остаётся впереди, поэтому трафик НА адреса роутера
 	// в туннель не заворачивается (DNS до него добирается через DNAT выше).
 	fakeIPIngressPriority = 29000
@@ -240,7 +241,7 @@ func fakeIPIngressNATDrift(dump string, spec FakeIPIngressSpec) bool {
 // приоритету, а не по «lookup <номер таблицы>»: при наличии имени таблицы в
 // /etc/iproute2/rt_tables iproute2 печатает имя, и матч по номеру видел бы
 // вечный дрейф, пересобирая правила каждый тик. Приоритет 29000 — наш по той
-// же конвенции, что 30000 у tproxy.
+// же конвенции, что IPRulePriority у tproxy.
 func fakeIPIngressOwnedRule(line string) bool {
 	return strings.HasPrefix(strings.TrimSpace(line), strconv.Itoa(fakeIPIngressPriority)+":")
 }

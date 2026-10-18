@@ -448,8 +448,11 @@ func TestIPTablesInstallSequence(t *testing.T) {
 	if !ruleDrainSeen {
 		t.Errorf("expected ip rule del drain pass")
 	}
-	if !ruleAddSeen || !strings.Contains(ruleAddArgs, "priority 30000") {
-		t.Errorf("expected ip rule add with priority 30000, got %q", ruleAddArgs)
+	// 1100, а не прежние 30000: правило обязано стоять раньше NDMS-шных
+	// `from all lookup` (IPsec site-to-site — 2000), иначе TPROXY'нутый DNS
+	// к удалённой подсети уходит в WAN мимо sing-box (F678).
+	if !ruleAddSeen || !strings.Contains(ruleAddArgs, "priority 1100") {
+		t.Errorf("expected ip rule add with priority 1100, got %q", ruleAddArgs)
 	}
 	if !routeAddSeen {
 		t.Errorf("expected ip route add local")
@@ -2484,5 +2487,62 @@ func TestInstall_DSCPOnlyDropsBlackholeRulesFile(t *testing.T) {
 func TestTProxyTargetProbeDefault_IsRealProbe(t *testing.T) {
 	if reflect.ValueOf(tproxyTargetProbe).Pointer() != reflect.ValueOf(IsTProxyTargetAvailable).Pointer() {
 		t.Fatal("tproxyTargetProbe по умолчанию обязан быть IsTProxyTargetAvailable")
+	}
+}
+
+// F677: соединение на порт redirect-инбаунда без NAT REDIRECT зацикливает
+// sing-box (direct → тот же слушатель). DROP обязан быть в каждом режиме и на
+// каждом redirect-порту, включая классы QoS, и только для не-DNAT соединений.
+func TestBuildRestoreInput_SelfLoopDrop(t *testing.T) {
+	drop := func(port int) string {
+		return fmt.Sprintf(`-A INPUT -p tcp --dport %d -m conntrack ! --ctstate DNAT -m comment --comment "%s" -j DROP`, port, SelfLoopTag)
+	}
+	qos := qosTestSpec()
+	dscp := qos
+	dscp.DSCPOnly = true
+	for name, spec := range map[string]RestoreInputSpec{
+		"policy":   {PolicyMark: "0xffffaaa"},
+		"v4off":    {PolicyMark: "0xffffaaa", V4Off: true},
+		"qos":      qos,
+		"dscpOnly": dscp,
+	} {
+		mangle := buildMangleRestoreInput(spec)
+		if !strings.Contains(mangle, drop(RedirectPort)) {
+			t.Errorf("%s: нет DROP на %d:\n%s", name, RedirectPort, mangle)
+		}
+		for _, q := range spec.QoSClasses {
+			if !strings.Contains(mangle, drop(q.RedirectPort)) {
+				t.Errorf("%s: нет DROP на порт класса %d:\n%s", name, q.RedirectPort, mangle)
+			}
+		}
+	}
+}
+
+// Правило живёт прямо в mangle INPUT, а restore идёт с --noflush: без скраба
+// по тегу каждый Install и каждый вызов хука добавлял бы дубль.
+func TestSelfLoopDrop_ScrubbedOnUninstallAndInHook(t *testing.T) {
+	line := `-A INPUT -p tcp --dport 51272 -m conntrack ! --ctstate DNAT -m comment --comment "` + SelfLoopTag + `" -j DROP`
+	fe := &fakeExec{}
+	it := newFakeIPTables(fe)
+	it.runIPTablesOut = func(_ context.Context, args ...string) (string, error) {
+		if slices.Contains(args, "INPUT") {
+			return "-P INPUT ACCEPT\n" + line + "\n", nil
+		}
+		return jumpsPresentDump(), nil
+	}
+	it.Uninstall(context.Background())
+	want := "-t mangle -D INPUT" + strings.TrimPrefix(line, "-A INPUT")
+	var got []string
+	for _, c := range fe.calls {
+		if c.kind == "iptables" {
+			got = append(got, strings.Join(c.args, " "))
+		}
+	}
+	if !slices.Contains(got, want) {
+		t.Errorf("Uninstall не снял self-loop DROP %q, сделано:\n%s", want, strings.Join(got, "\n"))
+	}
+
+	if n := strings.Count(netfilterHookScript(true), "scrub_tagged mangle "+SelfLoopTag+" INPUT"); n != 2 {
+		t.Errorf("хук чистит self-loop DROP перед restore mangle %d раз, ждём 2 (fast-heal и полный)", n)
 	}
 }

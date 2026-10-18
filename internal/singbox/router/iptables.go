@@ -67,12 +67,21 @@ const (
 	// Install to clean up the rules on upgrade from any prior AWGM
 	// build that installed the mangle-MARK form.
 	DNSNoPolicyTag = "AWGM-DNS-NOPOLICY"
+	// SelfLoopTag помечает DROP в mangle INPUT для TCP на порты redirect-
+	// инбаундов, пришедшего БЕЗ NAT REDIRECT (F677). У такого соединения
+	// исходный адрес назначения — сам слушатель, маршрут уводит его в direct,
+	// а direct подключается к тому же порту: петля, которая за секунды
+	// выедает fd движка. Перехваченное соединение несёт в conntrack DNAT и
+	// правило не задевает; транзит до чужого порта 51272 идёт мимо INPUT.
+	SelfLoopTag = "AWGM-SELFLOOP"
 	// IPRulePriority is the fixed `ip rule` priority for our fwmark rule.
-	// Above NDMS policy rules (~100-200) and below system main/default
-	// (32766/32767). Hard-coded so Install is fully idempotent and so
-	// our rule never accidentally displaces the kernel's local-table
-	// rule at priority 0.
-	IPRulePriority = 30000
+	// Below 0 (local) and the NDMS policy rules (100-105, their fwmark is
+	// overwritten by --tproxy-mark), above everything NDMS adds with
+	// `from all lookup <table>`: IPsec site-to-site puts its remote subnets
+	// at 2000 (table 248), and a rule below it sent TPROXY'd DNS to such a
+	// subnet out the WAN instead of into sing-box (F678). Same value and
+	// reason as IPRule6Priority. Hard-coded so Install is fully idempotent.
+	IPRulePriority = 1100
 	// maxIPRuleDrainPasses caps the drain loop in Install/Uninstall.
 	// Defensive bound — `ip rule del` should return ENOENT quickly when
 	// nothing matches, but a buggy kernel returning success forever
@@ -610,6 +619,20 @@ func emitPreroutingJump(b *strings.Builder, chain string, spec RestoreInputSpec)
 	}
 }
 
+// emitSelfLoopDrop рендерит DROP соединений на порты redirect-инбаундов в обход
+// NAT REDIRECT (см. SelfLoopTag). Во всех режимах: правило без слушателя на
+// порту ничего не стоит, а режимы с классами QoS слушают свои порты.
+func emitSelfLoopDrop(b *strings.Builder, spec RestoreInputSpec) {
+	ports := []int{RedirectPort}
+	for _, q := range spec.QoSClasses {
+		ports = append(ports, q.RedirectPort)
+	}
+	for _, p := range ports {
+		fmt.Fprintf(b, "-A INPUT -p tcp --dport %d -m conntrack ! --ctstate DNAT -m comment --comment %q -j DROP\n",
+			p, SelfLoopTag)
+	}
+}
+
 // buildBlackholeRestoreInput renders the mangle-only *AWGM-BLACKHOLE* blob:
 // the SAME LAN/router/WAN RETURN exclusions as the interception chain, then a
 // terminal DROP, entered from PREROUTING by the identical policy selector
@@ -690,6 +713,7 @@ func buildMangleRestoreInput(spec RestoreInputSpec) string {
 	// set_chain_rules (`INTERCEPT_DNS_ENABLE=1` branch). No extras.
 	b.WriteString("*mangle\n")
 	fmt.Fprintf(&b, ":%s - [0:0]\n", ChainName)
+	emitSelfLoopDrop(&b, spec)
 
 	// ipv6_only: цепочка пустая, остаётся только джамп (см. V4Off).
 	if spec.V4Off {
@@ -1048,9 +1072,8 @@ func (it *IPTables) Install(ctx context.Context, spec RestoreInputSpec) error {
 	// local` rule (normally at prio 0), breaking router-local routing
 	// (sing-box outbounds to direct silently fail).
 	it.drainFwmarkRules(ctx)
-	// Use an explicit priority well above NDMS policy rules (100-200)
-	// and well below the system main/default tables (32766/32767), so
-	// our rule is identifiable and idempotent.
+	// Explicit priority (see IPRulePriority) keeps the rule identifiable
+	// and idempotent; the drain above also removes the pre-F678 rule at 30000.
 	if err := it.runIP(ctx, "rule", "add", "fwmark", fmt.Sprintf("0x%x", Fwmark),
 		"table", fmt.Sprintf("%d", RoutingTable),
 		"priority", fmt.Sprintf("%d", IPRulePriority)); err != nil {
@@ -1260,11 +1283,13 @@ scrub_jumps() {
     | sed 's/-A PREROUTING/-D PREROUTING/' \
     | while IFS= read -r line; do /opt/sbin/iptables -w -t "$1" $line 2>/dev/null; done
 }
-# scrub_tagged <table> <tag>: delete comment-tagged direct PREROUTING rules.
+# scrub_tagged <table> <tag> [chain]: delete comment-tagged direct rules
+# (chain defaults to PREROUTING).
 scrub_tagged() {
-  /opt/sbin/iptables -w -t "$1" -S PREROUTING 2>/dev/null \
+  c="${3:-PREROUTING}"
+  /opt/sbin/iptables -w -t "$1" -S "$c" 2>/dev/null \
     | grep -E -- "--comment \"?$2" \
-    | sed 's/-A PREROUTING/-D PREROUTING/' \
+    | sed "s/-A $c/-D $c/" \
     | while IFS= read -r line; do /opt/sbin/iptables -w -t "$1" $line 2>/dev/null; done
 }
 if pidof sing-box >/dev/null 2>&1; then
@@ -1295,6 +1320,8 @@ if pidof sing-box >/dev/null 2>&1; then
         scrub_tagged mangle %[8]s
         # Ingress-scope MARK/CONNMARK rules (comment-tagged).
         scrub_tagged mangle %[9]s
+        # Self-loop DROP in mangle INPUT (comment-tagged).
+        scrub_tagged mangle %[18]s INPUT
         /opt/sbin/iptables-restore --noflush < %[12]q
         /opt/sbin/ip rule add fwmark 0x%[3]x table %[4]d priority %[5]d 2>/dev/null || true
         /opt/sbin/ip route add local 0.0.0.0/0 dev lo table %[4]d 2>/dev/null || true
@@ -1313,6 +1340,7 @@ if pidof sing-box >/dev/null 2>&1; then
       scrub_tagged nat %[7]s
       scrub_tagged mangle %[8]s
       scrub_tagged mangle %[9]s
+      scrub_tagged mangle %[18]s INPUT
       /opt/sbin/iptables-restore --noflush < %[1]q
       /opt/sbin/ip rule add fwmark 0x%[3]x table %[4]d priority %[5]d 2>/dev/null || true
       /opt/sbin/ip route add local 0.0.0.0/0 dev lo table %[4]d 2>/dev/null || true
@@ -1325,7 +1353,7 @@ if pidof sing-box >/dev/null 2>&1; then
 else
 %[10]sfi
 exit 0
-`, netfilterRulesPath, ChainName, Fwmark, RoutingTable, IPRulePriority, RedirectChain, DNSRescueTag, DNSNoPolicyTag, IngressTag, deadBranch, BlackholeChain, netfilterMangleRulesPath, netfilterNatRulesPath, netfilterCtCleanPath, bypassSavePath, bypassSetName, bypassset.SetMaxElem)
+`, netfilterRulesPath, ChainName, Fwmark, RoutingTable, IPRulePriority, RedirectChain, DNSRescueTag, DNSNoPolicyTag, IngressTag, deadBranch, BlackholeChain, netfilterMangleRulesPath, netfilterNatRulesPath, netfilterCtCleanPath, bypassSavePath, bypassSetName, bypassset.SetMaxElem, SelfLoopTag)
 }
 
 // ctCleanScript renders the poisoned-flow eviction script (issue #627). While
@@ -1487,6 +1515,8 @@ func (it *IPTables) removeSourceHooks(ctx context.Context) {
 	// tagged AWGM-INGRESS. Scrub before re-install so the list stays
 	// idempotent and removed interfaces don't leave dangling marks.
 	it.removeCommentTaggedRulesFromTable(ctx, "mangle", "PREROUTING", IngressTag)
+	// Self-loop DROP: direct mangle INPUT rules, same scrub-before-restore.
+	it.removeCommentTaggedRulesFromTable(ctx, "mangle", "INPUT", SelfLoopTag)
 }
 
 // removeCommentTaggedRulesFromTable scrubs every rule in `chain` whose
