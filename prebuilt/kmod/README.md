@@ -17,7 +17,8 @@ produce 10 files here — and those 10 hold only **9 distinct binaries**, becaus
 `KN-1212` and `KN-1710` are byte-identical in `.text`, `.data` and `.rodata`
 (true of the 3.0 batch as well as 3.1). They are kept as two names rather than
 aliased, so that `modelAlias` does not have to change on a version bump; the cost
-is one duplicate file. Within a group `.text`, `.data`, `.rodata`, `.modinfo` and
+is one duplicate file. A rebuild therefore needs nine builds, not ten: copy the
+KN-1212 module to the KN-1710 name instead of building it. Within a group `.text`, `.data`, `.rodata`, `.modinfo` and
 vermagic are identical, `__versions` is empty (no CONFIG_MODVERSIONS, so no
 per-kernel symbol CRCs), and the undefined-symbol sets match. What separates the
 groups is kernel configuration the hwnat patch keys off, which is why KN-1011
@@ -66,7 +67,8 @@ a measurable win on mips), **018** (`has_protection` now computed after the
 `IS_ERR(wg)` check) and **022** (`le32_to_cpu` added on all four message-type
 comparisons). 3.1.20260906 took **019** as well (`init_rwsem` on
 `header_protection.lock`, hunk for hunk, plus `down_write` in `set_key` where
-the key used to be written under a read lock). Ten patches remain; 010 and 017
+the key used to be written under a read lock). Ten patches remained (023 came
+later, see below); 010 and 017
 were regenerated for the new `trailer` argument of
 `wg_socket_send_buffer_to_peer()`, the rest apply unchanged.
 
@@ -91,6 +93,19 @@ on it:
 | 015 | the new blake2s compat block pulls the kernel's `crypto/blake2s.h` into zinc's own translation units |
 | 017 | Jmin is never checked against Jmax, so the junk packet size can run past the jmax-sized buffer |
 | 021 | the crypt workers call `cond_resched()` inside the SIMD region, so an arm64 worker can sleep with NEON still held |
+
+023 is not a build fix but a data-loss one, and it is not upstream yet: it is
+the still-open upstream PR #242 for issue #226 (the number 022 is taken by the
+big-endian patch described below). With `RandomTrailers` on, the H1–H3 checks
+take any datagram at least as long as the handshake, so a transport packet
+whose bytes at the S1/S2/S3 offset fall inside an H range goes down the
+handshake path and dies on MAC1 without touching a counter. The patch makes such
+a hit fall back to transport when the packet also matches H4 and its key index
+belongs to a live keypair. Reproduced on a KN-1810 stand, each module side by
+side (S 47/77/29/18, header protection key, four H ranges of 100 000 001 each,
+3000 datagrams of 1000 bytes): without the patch 210 lost with trailers on and 0
+with them off; with it 0 either way. The module version stays `3.1.20260906`,
+so a router that already has the old one loaded keeps running it until reboot.
 
 The former 019 (now upstream, see above) is the one that put mipsel routers in
 a boot loop while aarch64 was fine: `wg_newlink()` never initialised
