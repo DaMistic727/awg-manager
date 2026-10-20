@@ -189,6 +189,9 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 
 	applyManualText(&list)
 	applyExcludesText(&list)
+	if err := rejectGeoTags(&list); err != nil {
+		return nil, err
+	}
 
 	if len(list.ManualDomains) == 0 && len(list.Subscriptions) == 0 {
 		return nil, fmt.Errorf("at least one domain or subscription is required")
@@ -219,6 +222,23 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 		return nil, err
 	}
 
+	// Подписки проверяются загрузкой ДО записи, и загруженное сразу идёт в
+	// список: отвергнутый список не попадает на диск, а каждая подписка
+	// скачивается один раз (F696).
+	if len(list.Subscriptions) > 0 {
+		fetched, err := s.validateSubscriptions(ctx, &list, list.Subscriptions)
+		if err != nil {
+			return nil, err
+		}
+		results := make([]subscriptionFetch, len(fetched))
+		for i, domains := range fetched {
+			results[i] = subscriptionFetch{domains: domains}
+		}
+		if err := applySubscriptionFetches(&list, results, now); err != nil {
+			return nil, err
+		}
+	}
+
 	s.dedup(data, &list)
 
 	data.Lists = append(data.Lists, list)
@@ -229,31 +249,11 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 
 	s.appLog.Info("create", list.ID, "list created: "+list.Name)
 
-	// Validate subscriptions by fetching them. If any URL fails (wrong
-	// Content-Type, unreachable, etc.), reject the entire Create.
-	if len(list.Subscriptions) > 0 {
-		if err := s.validateSubscriptions(ctx, &list, list.Subscriptions); err != nil {
-			// Remove the just-appended list. После записи data — сам кэш:
-			// откат правит свой черновик, а не кэш на месте (F695).
-			rollback := s.store.Draft()
-			rollback.Lists = slices.DeleteFunc(rollback.Lists, func(l DomainList) bool { return l.ID == list.ID })
-			if serr := s.store.Save(rollback); serr != nil {
-				s.logError("create", list.ID, "Rollback save failed", serr.Error())
-			}
-			return nil, err
-		}
-		if err := s.refreshSubscriptions(ctx, list.ID); err != nil {
-			s.logError("create", list.ID, "Refresh subscriptions failed", err.Error())
-		}
-	} else {
-		if err := s.reconcileAll(ctx); err != nil {
-			s.logError("create", list.ID, "Reconcile failed", err.Error())
-		}
+	if err := s.reconcileAll(ctx); err != nil {
+		s.logError("create", list.ID, "Reconcile failed", err.Error())
 	}
 
-	// Re-read the list after refresh (Domains may have been updated).
-	// Из кэша: обновление подписок записало свой черновик, data устарел
-	// (F695). Копия: ответ кодируется вне opMu (F667).
+	// Копия из кэша: ответ кодируется вне opMu (F667).
 	cur := s.store.GetCached()
 	for i := range cur.Lists {
 		if cur.Lists[i].ID == list.ID {
@@ -412,22 +412,78 @@ func (s *ServiceImpl) Update(ctx context.Context, list DomainList) (*DomainList,
 		}
 	}
 
-	// Validate any new subscription URLs before saving.
-	newSubs := findNewSubscriptions(existing.Subscriptions, list.Subscriptions)
+	if err := rejectGeoTags(&list); err != nil {
+		return nil, err
+	}
+
+	// Validate any new subscription URLs before saving. Скачанное проверкой
+	// сразу идёт в список — без второй загрузки и без ожидания обновления.
+	// Повтор адреса в запросе качается один раз.
+	var newSubs []Subscription
+	for _, sub := range findNewSubscriptions(existing.Subscriptions, list.Subscriptions) {
+		if !slices.ContainsFunc(newSubs, func(n Subscription) bool { return n.URL == sub.URL }) {
+			newSubs = append(newSubs, sub)
+		}
+	}
+	fetchedByURL := make(map[string]subscriptionFetch, len(list.Subscriptions))
 	if len(newSubs) > 0 {
-		if err := s.validateSubscriptions(ctx, &list, newSubs); err != nil {
+		fetched, err := s.validateSubscriptions(ctx, &list, newSubs)
+		if err != nil {
 			return nil, err
+		}
+		for i, sub := range newSubs {
+			fetchedByURL[sub.URL] = subscriptionFetch{domains: fetched[i]}
 		}
 	}
 
-	// Merge domains: manual domains + existing subscription domains, then
-	// classify into DNS-style domains vs CIDR subnets so HR Neo writes them
-	// into the correct file (domain.conf vs ip.list).
-	manual := deduplicateDomains(list.ManualDomains)
-	subDomains := subscriptionDomains(existing.Domains, existing.ManualDomains)
-	list.Domains, list.Subnets = splitDomainsAndSubnets(deduplicateDomains(append(manual, subDomains...)))
-	if err := validateSubnetsLimit(len(list.routedSubnets(list.Subnets))); err != nil {
-		return nil, err
+	if len(findNewSubscriptions(list.Subscriptions, existing.Subscriptions)) > 0 {
+		// Снята хоть одна подписка: её строки в Domains/Subnets не отделить
+		// от строк остальных, и перенос держал бы их до обновления (а с
+		// ними и место в лимите). Список пересобирается из ручных и свежей
+		// загрузки всех текущих подписок; отказ стоящей не фатален — как
+		// при обновлении.
+		results := make([]subscriptionFetch, len(list.Subscriptions))
+		for i, sub := range list.Subscriptions {
+			res, ok := fetchedByURL[sub.URL]
+			if !ok {
+				domains, err := s.fetchSubscription(ctx, sub.URL)
+				if err != nil {
+					// The journal line is scrubbed by logging.Service.AppLog.
+					s.appLog.Warn("subscription-fetch", list.ID, fmt.Sprintf("url=%s err=%s", sub.URL, err.Error()))
+				}
+				res = subscriptionFetch{domains: domains, err: err}
+				fetchedByURL[sub.URL] = res
+			}
+			results[i] = res
+		}
+		if err := applySubscriptionFetches(&list, results, list.UpdatedAt); err != nil {
+			return nil, err
+		}
+	} else {
+		var newDomains []string
+		for _, sub := range newSubs {
+			newDomains = append(newDomains, fetchedByURL[sub.URL].domains...)
+		}
+		for i := range list.Subscriptions {
+			if res, ok := fetchedByURL[list.Subscriptions[i].URL]; ok {
+				recordSubscriptionFetch(&list.Subscriptions[i], res, list.UpdatedAt)
+			}
+		}
+
+		// Merge domains: manual domains + existing subscription domains + new
+		// subscriptions' domains, then classify into DNS-style domains vs CIDR
+		// subnets so HR Neo writes them into the correct file (domain.conf vs ip.list).
+		manual := deduplicateDomains(list.ManualDomains)
+		// Содержимое стоящих подписок — Domains и Subnets за вычетом ручных
+		// строк: подсети подписок лежат в Subnets и иначе терялись (F697).
+		// Concat, а не append: Domains общий с кэшем (Draft), append мог бы
+		// писать в его массив.
+		subDomains := subscriptionDomains(slices.Concat(existing.Domains, existing.Subnets), existing.ManualDomains)
+		merged := append(append(manual, subDomains...), newDomains...)
+		list.Domains, list.Subnets = splitDomainsAndSubnets(deduplicateDomains(merged))
+		if err := validateSubnetsLimit(len(list.routedSubnets(list.Subnets))); err != nil {
+			return nil, err
+		}
 	}
 
 	list.Excludes, list.ExcludeSubnets = splitDomainsAndSubnets(deduplicateDomains(list.Excludes))
@@ -622,6 +678,9 @@ func (s *ServiceImpl) CreateBatch(ctx context.Context, lists []DomainList) ([]*D
 		if len(list.ManualDomains) == 0 && len(list.Subscriptions) == 0 {
 			continue
 		}
+		if err := rejectGeoTags(&list); err != nil {
+			return nil, fmt.Errorf("%q: %w", list.Name, err)
+		}
 
 		if err := s.resolveRouteInterfaces(ctx, list.Routes); err != nil {
 			return nil, fmt.Errorf("resolve routes for %q: %w", list.Name, err)
@@ -775,31 +834,34 @@ func (e redactedError) Unwrap() error { return e.err }
 
 // validateSubscriptions fetches each subscription URL and verifies it returns
 // text/plain with at least one parseable domain. Returns the first error encountered.
-func (s *ServiceImpl) validateSubscriptions(ctx context.Context, list *DomainList, subs []Subscription) error {
+// На успехе отдаёт загруженные домены — по подписке, в порядке subs.
+func (s *ServiceImpl) validateSubscriptions(ctx context.Context, list *DomainList, subs []Subscription) ([][]string, error) {
 	seenSubnets := make(map[string]struct{})
+	fetched := make([][]string, 0, len(subs))
 	for _, sub := range subs {
 		domains, err := s.fetchSubscription(ctx, sub.URL)
 		// The error goes back to REST and to the MCP tools that create a
 		// list: the address and the fetch error keep scheme and host only,
 		// since both can carry a token (a redirect hop's too).
 		if err != nil {
-			return redactedError{
+			return nil, redactedError{
 				msg: fmt.Sprintf("подписка %s: %s", logging.RedactURLs(sub.URL), logging.RedactURLs(err.Error())),
 				err: err,
 			}
 		}
 		if len(domains) == 0 {
-			return fmt.Errorf("подписка %s: список пуст — URL не содержит доменов", logging.RedactURLs(sub.URL))
+			return nil, fmt.Errorf("подписка %s: список пуст — URL не содержит доменов", logging.RedactURLs(sub.URL))
 		}
 		_, subnets := splitDomainsAndSubnets(domains)
 		for _, subnet := range list.routedSubnets(subnets) {
 			seenSubnets[subnet] = struct{}{}
 		}
 		if err := validateSubnetsLimit(len(seenSubnets)); err != nil {
-			return err
+			return nil, err
 		}
+		fetched = append(fetched, domains)
 	}
-	return nil
+	return fetched, nil
 }
 
 // RefreshSubscriptions fetches all subscriptions for a single list and merges domains.
@@ -830,36 +892,20 @@ func (s *ServiceImpl) refreshSubscriptions(ctx context.Context, id string) error
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Fetch each subscription
-	var allSubDomains [][]string
-	for i := range list.Subscriptions {
-		sub := &list.Subscriptions[i]
+	results := make([]subscriptionFetch, len(list.Subscriptions))
+	for i, sub := range list.Subscriptions {
 		domains, err := s.fetchSubscription(ctx, sub.URL)
-		sub.LastFetched = now
 		if err != nil {
-			// net/http quotes the address whole, a redirect hop's too, and
-			// a list's address can carry a token in its path or query. The
-			// stored text is what REST, the web interface and MCP read, so
-			// it keeps only scheme and host.
-			reason := logging.RedactURLs(err.Error())
-			sub.LastError = reason
-			sub.LastCount = 0
 			// The journal line is scrubbed by logging.Service.AppLog.
 			s.appLog.Warn("subscription-fetch", id, fmt.Sprintf("url=%s err=%s", sub.URL, err.Error()))
 			// Keep going — one failed subscription shouldn't block others
-			continue
 		}
-		sub.LastError = ""
-		sub.LastCount = len(domains)
-		allSubDomains = append(allSubDomains, domains)
+		results[i] = subscriptionFetch{domains: domains, err: err}
 	}
 
-	// Merge manual + subscription domains, then classify CIDRs → Subnets.
-	merged := mergeDomains(list.ManualDomains, allSubDomains)
-	domains, subnets := splitDomainsAndSubnets(merged)
-	if err := validateSubnetsLimit(len(list.routedSubnets(subnets))); err != nil {
+	if err := applySubscriptionFetches(list, results, now); err != nil {
 		return err
 	}
-	list.Domains, list.Subnets = domains, subnets
 	s.dedup(data, list)
 	list.UpdatedAt = now
 
@@ -870,6 +916,52 @@ func (s *ServiceImpl) refreshSubscriptions(ctx context.Context, id string) error
 	s.appLog.Info("subscription-refresh", id, fmt.Sprintf("totalDomains=%d", len(list.Domains)))
 
 	return s.reconcileAll(ctx)
+}
+
+// subscriptionFetch — итог загрузки одной подписки.
+type subscriptionFetch struct {
+	domains []string
+	err     error
+}
+
+// applySubscriptionFetches переносит итоги загрузки (results[i] — для
+// list.Subscriptions[i]) в список: состояние каждой подписки, затем
+// Domains/Subnets из ручных доменов и загруженного. Неудачная загрузка
+// не фатальна — подписка просто не даёт доменов. Ошибка — только лимит
+// подсетей; тогда Domains/Subnets не тронуты.
+func applySubscriptionFetches(list *DomainList, results []subscriptionFetch, now string) error {
+	var allSubDomains [][]string
+	for i := range list.Subscriptions {
+		recordSubscriptionFetch(&list.Subscriptions[i], results[i], now)
+		if results[i].err == nil {
+			allSubDomains = append(allSubDomains, results[i].domains)
+		}
+	}
+
+	// Merge manual + subscription domains, then classify CIDRs → Subnets.
+	merged := mergeDomains(list.ManualDomains, allSubDomains)
+	domains, subnets := splitDomainsAndSubnets(merged)
+	if err := validateSubnetsLimit(len(list.routedSubnets(subnets))); err != nil {
+		return err
+	}
+	list.Domains, list.Subnets = domains, subnets
+	return nil
+}
+
+// recordSubscriptionFetch пишет в подписку итог её загрузки.
+func recordSubscriptionFetch(sub *Subscription, res subscriptionFetch, now string) {
+	sub.LastFetched = now
+	if res.err != nil {
+		// net/http quotes the address whole, a redirect hop's too, and
+		// a list's address can carry a token in its path or query. The
+		// stored text is what REST, the web interface and MCP read, so
+		// it keeps only scheme and host.
+		sub.LastError = logging.RedactURLs(res.err.Error())
+		sub.LastCount = 0
+		return
+	}
+	sub.LastError = ""
+	sub.LastCount = len(res.domains)
 }
 
 func validateSubnetsLimit(count int) error {
@@ -1145,6 +1237,28 @@ func deduplicateDomains(domains []string) []string {
 // must be preserved for HR Neo's byte-for-byte tag match.
 func isGeoTag(s string) bool {
 	return strings.HasPrefix(s, "geosite:") || strings.HasPrefix(s, "geoip:")
+}
+
+// hasGeoPrefix — geosite:/geoip: в любом регистре. NDMS не принимает
+// geo-теги в object-group fqdn вообще (стенд KN-1810 5.02.B.1, 20.10:
+// status error 101582220 «invalid FQDN or IP address», E в журнале ndm), их
+// понимает только HydraRoute (F700).
+func hasGeoPrefix(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	return strings.HasPrefix(l, "geosite:") || strings.HasPrefix(l, "geoip:")
+}
+
+// rejectGeoTags отвергает NDMS-список с geo-тегом в ручных строках или
+// исключениях (после применения ManualText/ExcludesText).
+func rejectGeoTags(list *DomainList) error {
+	for _, entries := range [][]string{list.ManualDomains, list.Excludes, list.ExcludeSubnets} {
+		for _, e := range entries {
+			if hasGeoPrefix(e) {
+				return fmt.Errorf("geo-тег %s не поддерживается NDMS-маршрутизацией", strings.TrimSpace(e))
+			}
+		}
+	}
+	return nil
 }
 
 // subscriptionDomains returns the domains that came from subscriptions (present in
