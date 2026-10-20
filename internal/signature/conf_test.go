@@ -106,3 +106,37 @@ func TestHeaderOrDefault(t *testing.T) {
 		t.Fatalf("диапазон не должен подменяться, got %q", got)
 	}
 }
+
+// Параметры 3.x (#688, F681): rc отдаёт числа, пара start/end — "N" или
+// "N-M", нули не пишутся, флаги — "on" (грамматика config.writeAWG3Params).
+func TestWriteASCConf_ASC3(t *testing.T) {
+	for name, raw := range map[string]string{
+		"числа":  `{"jc":3,"header-protection-key":"K=","rekey-after-time-start":120,"rekey-after-time-end":120,"content-padding-addition-start":0,"content-padding-addition-end":80,"keepalive-timeout-start":0,"keepalive-timeout-end":0,"random-trailers":1,"disable-cookies":0}`,
+		"строки": `{"jc":3,"header-protection-key":"K=","rekey-after-time-start":"120","rekey-after-time-end":"120","content-padding-addition-start":"0","content-padding-addition-end":"80","keepalive-timeout-start":"0","keepalive-timeout-end":"0","random-trailers":"1","disable-cookies":"0"}`,
+	} {
+		var b strings.Builder
+		WriteASCConf(&b, json.RawMessage(raw), GeneratedPackets{})
+		got := b.String()
+		for _, want := range []string{"HeaderProtectionKey = K=\n", "RekeyAfterTime = 120\n", "ContentPaddingAddition = 0-80\n", "RandomTrailers = on\n"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: нет %q:\n%s", name, want, got)
+			}
+		}
+		if strings.Contains(got, "KeepaliveTimeout") || strings.Contains(got, "DisableCookies") {
+			t.Errorf("%s: незаданное записано:\n%s", name, got)
+		}
+	}
+}
+
+// ASC 3.1 с Jc = 0 (сервер junk не шлёт) — не «обычный WireGuard»: без S/H/HP
+// клиент не подключится (ревью #688).
+func TestWriteASCConf_ASC3WithoutJunk(t *testing.T) {
+	var b strings.Builder
+	WriteASCConf(&b, json.RawMessage(`{"jc":0,"s1":16,"s2":17,"s3":18,"s4":19,"h1":"1","h2":"2","h3":"3","h4":"4","header-protection-key":"K=","random-trailers":1}`), GeneratedPackets{})
+	got := b.String()
+	for _, want := range []string{"S1 = 16\n", "S4 = 19\n", "HeaderProtectionKey = K=\n", "RandomTrailers = on\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("нет %q:\n%s", want, got)
+		}
+	}
+}

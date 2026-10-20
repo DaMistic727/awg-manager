@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { m } from '$lib/i18n';
-	import type { WireguardServerConfig, WireguardServerPeerConfig, ASCParams } from '$lib/types';
+	import type { WireguardServerConfig, WireguardServerPeerConfig, ASCParams, ASCParamsExtended } from '$lib/types';
 	import { Modal, Button } from '$lib/components/ui';
+	import { asc3ConfLines, headerProtectionKey } from '$lib/utils/asc3Conf';
 
 	interface Props {
 		open: boolean;
@@ -35,22 +36,27 @@
 
 		// Сигнатуры (I1-I5) здесь нет: она принадлежит пиру (CONTEXT.md
 		// «Сигнатура AWG»), а этот генератор открывается как раз для пиров,
-		// чьих ключей у нас нет. Jc == 0 — сервер без обфускации: числовые
-		// параметры в конфиг не пишем, как и на бэкенде.
-		if (ascParams && ascParams.jc > 0) {
+		// чьих ключей у нас нет. Jc == 0 и нет защиты заголовков — сервер без
+		// обфускации: числовые параметры в конфиг не пишем, как и на бэкенде.
+		// ASC 3.x с Jc == 0 легален, и без S/H/HP клиент не подключится (F685).
+		if (ascParams && (ascParams.jc > 0 || headerProtectionKey(ascParams))) {
 			lines.push(`Jc = ${ascParams.jc}`);
 			lines.push(`Jmin = ${ascParams.jmin}`);
 			lines.push(`Jmax = ${ascParams.jmax}`);
 			lines.push(`S1 = ${ascParams.s1}`);
 			lines.push(`S2 = ${ascParams.s2}`);
-			lines.push(`H1 = ${ascParams.h1}`);
-			lines.push(`H2 = ${ascParams.h2}`);
-			lines.push(`H3 = ${ascParams.h3}`);
-			lines.push(`H4 = ${ascParams.h4}`);
-			if ('s3' in ascParams) {
-				lines.push(`S3 = ${ascParams.s3}`);
-				lines.push(`S4 = ${ascParams.s4}`);
+			// Пустой H — номер типа сообщения, как signature.HeaderOrDefault: строка
+			// `H1 = ` роняет весь `awg setconf` (F167).
+			lines.push(`H1 = ${ascParams.h1 || '1'}`);
+			lines.push(`H2 = ${ascParams.h2 || '2'}`);
+			lines.push(`H3 = ${ascParams.h3 || '3'}`);
+			lines.push(`H4 = ${ascParams.h4 || '4'}`);
+			const ext = ascParams as ASCParamsExtended;
+			if (ext.s3 > 0 || ext.s4 > 0) {
+				lines.push(`S3 = ${ext.s3}`);
+				lines.push(`S4 = ${ext.s4}`);
 			}
+			lines.push(...asc3ConfLines(ascParams));
 		}
 
 		lines.push('');

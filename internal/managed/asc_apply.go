@@ -3,10 +3,12 @@ package managed
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -241,7 +243,14 @@ func validateASCParamsRequired(raw json.RawMessage) error {
 	return nil
 }
 
-func (s *Service) generateDefaultASCParams() (json.RawMessage, error) {
+func (s *Service) generateDefaultASCParams(mode string) (json.RawMessage, error) {
+	if mode == ModeAWG31 {
+		key := make([]byte, 32)
+		if _, err := crand.Read(key); err != nil {
+			return nil, fmt.Errorf("header protection key: %w", err)
+		}
+		return generateASC31ParamsRaw(rand.NewSource(time.Now().UnixNano()), key)
+	}
 	extended := osdetect.AtLeast(5, 1)
 	hRanges := ndmsinfo.SupportsHRanges()
 	return generateASCParamsRaw(extended, hRanges, rand.NewSource(time.Now().UnixNano()))
@@ -292,6 +301,18 @@ func (s *Service) applyASCParams(ctx context.Context, iface query.Confirmed, raw
 	return nil
 }
 
+// hasASC3 — в ASC есть параметры 3.x (снимок сервера 3.1).
+func hasASC3(raw json.RawMessage) bool {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) != nil {
+		return false
+	}
+	return slices.ContainsFunc(ndms.ASC3Keys, func(k string) bool {
+		_, ok := obj[k]
+		return ok
+	})
+}
+
 // ValidateASCParams exposes managed ASC validation for callers that need to
 // decide whether ASC payload is exportable/applicable.
 func ValidateASCParams(raw json.RawMessage) error {
@@ -334,6 +355,23 @@ func normalizeASCForCompare(raw json.RawMessage) (map[string]string, bool, error
 		case "jc", "jmin", "jmax", "s1", "s2", "s3", "s4":
 			if isASCRequiredValueEmpty(trimmed) {
 				out[k] = "0"
+				continue
+			}
+			var n float64
+			if err := json.Unmarshal(trimmed, &n); err != nil {
+				return nil, false, err
+			}
+			out[k] = fmt.Sprintf("%g", n)
+		default:
+			// Ключи 3.x (#688): прошивка неполный набор молча игнорирует, и
+			// без сравнения отказ записи сервера 3.1 прошёл бы как успех (F682).
+			// rc отдаёт числа, ключ HP — строкой.
+			if !slices.Contains(ndms.ASC3Keys, k) {
+				continue
+			}
+			var str string
+			if json.Unmarshal(trimmed, &str) == nil {
+				out[k] = strings.TrimSpace(str)
 				continue
 			}
 			var n float64

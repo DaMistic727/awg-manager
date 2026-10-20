@@ -26,13 +26,17 @@ func HeaderOrDefault(v string, msgType int) string {
 // header-параметры — из снимка ASC интерфейса (raw), сигнатуру I1–I5 — из
 // записи ПИРА (CONTEXT.md «Сигнатура AWG»: у сервера своей нет).
 //
-// Сервер без ASC (Jc == 0) — обычный WireGuard: ни числовых параметров, ни
-// сигнатуры в конфиг не пишем, иначе клиент получит обфускацию, которой на
-// сервере нет. Один writer на оба пути — managed-сервер (internal/managed)
-// и системный (internal/api).
+// Сервер без ASC (Jc == 0 и без защиты заголовков) — обычный WireGuard: ни
+// числовых параметров, ни сигнатуры в конфиг не пишем, иначе клиент получит
+// обфускацию, которой на сервере нет. ASC 3.1 с Jc = 0 легален (сервер junk не
+// шлёт), и без S/H/HP клиент к нему не подключится. Один writer на оба пути —
+// managed-сервер (internal/managed) и системный (internal/api).
 func WriteASCConf(b *strings.Builder, raw json.RawMessage, packets GeneratedPackets) {
-	var ext ndms.ASCParamsExtended
-	if err := json.Unmarshal(raw, &ext); err != nil || ext.Jc == 0 {
+	var ext struct {
+		ndms.ASCParamsExtended
+		HeaderProtectionKey string `json:"header-protection-key"`
+	}
+	if err := json.Unmarshal(raw, &ext); err != nil || (ext.Jc == 0 && ext.HeaderProtectionKey == "") {
 		return
 	}
 
@@ -54,5 +58,49 @@ func WriteASCConf(b *strings.Builder, raw json.RawMessage, packets GeneratedPack
 		if sig != "" {
 			fmt.Fprintf(b, "I%d = %s\n", i+1, sig)
 		}
+	}
+	writeASC3Conf(b, raw)
+}
+
+// writeASC3Conf — параметры AWG 3.x из ASC интерфейса (5.02.A.11+, #688):
+// без них клиент сервера 3.1 не подключится — 0 ответов (F681). Ключи и
+// грамматика — как у туннелей (config.writeAWG3Params): пишется только
+// заданное, пара start/end — "N" или "N-M", флаги — "on". rc отдаёт числа,
+// поэтому принимаются и числа, и строки.
+func writeASC3Conf(b *strings.Builder, raw json.RawMessage) {
+	var asc map[string]json.RawMessage
+	if json.Unmarshal(raw, &asc) != nil {
+		return
+	}
+	num := func(k string) int {
+		n, _ := strconv.Atoi(strings.Trim(string(asc[k]), `"`))
+		return n
+	}
+	var hp string
+	if json.Unmarshal(asc["header-protection-key"], &hp) == nil && hp != "" {
+		fmt.Fprintf(b, "HeaderProtectionKey = %s\n", hp)
+	}
+	for _, r := range []struct{ conf, key string }{
+		{"ContentPaddingAddition", "content-padding-addition"},
+		{"RekeyAfterTime", "rekey-after-time"},
+		{"RekeyTimeout", "rekey-timeout"},
+		{"RejectAfterTime", "reject-after-time"},
+		{"KeepaliveTimeout", "keepalive-timeout"},
+		{"MaxHandshakeAttempts", "max-handshake-attempts"},
+	} {
+		lo, hi := num(r.key+"-start"), num(r.key+"-end")
+		switch {
+		case lo == 0 && hi == 0:
+		case lo == hi:
+			fmt.Fprintf(b, "%s = %d\n", r.conf, lo)
+		default:
+			fmt.Fprintf(b, "%s = %d-%d\n", r.conf, lo, hi)
+		}
+	}
+	if num("random-trailers") != 0 {
+		b.WriteString("RandomTrailers = on\n")
+	}
+	if num("disable-cookies") != 0 {
+		b.WriteString("DisableCookies = on\n")
 	}
 }
