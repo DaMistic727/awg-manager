@@ -30,6 +30,7 @@ import type {
 	ServerListenChangeResult,
 	ServerListenState,
 	Settings,
+	SettingsPatch,
 	SignatureCaptureResult,
 	SignatureGenerateResult,
 	SpeedTestInfo,
@@ -296,17 +297,25 @@ export class SystemClient extends TunnelsClient {
 		return this.request('/settings/get');
 	}
 
-	async updateSettings(settings: Partial<Settings>): Promise<Settings> {
+	async updateSettings(patch: SettingsPatch): Promise<Settings> {
 		const updated = await this.request<Settings>('/settings/update', {
 			method: 'POST',
-			body: JSON.stringify(settings)
+			body: JSON.stringify(patch)
 		});
 		// Prism mock is stateless: it often returns schema examples instead of
 		// echoing persisted values. In mock-dev mode keep UI controls usable by
-		// merging the patch into current settings snapshot.
+		// merging the patch into current settings snapshot — by field at every
+		// level, as the backend does (pingCheck.defaults included).
 		if (this.isMockDevMode()) {
 			const current = await this.getSettings().catch(() => ({} as Settings));
-			return { ...current, ...settings };
+			const isObj = (x: unknown): x is Record<string, unknown> =>
+				!!x && typeof x === 'object' && !Array.isArray(x);
+			const merge = (base: unknown, p: unknown): unknown =>
+				isObj(base) && isObj(p)
+					? Object.fromEntries([...new Set([...Object.keys(base), ...Object.keys(p)])].map((k) =>
+						[k, k in p ? merge(base[k], p[k]) : base[k]]))
+					: p;
+			return merge(current, patch) as Settings;
 		}
 		return updated;
 	}
