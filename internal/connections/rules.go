@@ -114,16 +114,17 @@ func parseGroupNameToSlug(groupName string) (string, bool) {
 // reverse-map a slug (sanitized list name) back to its list ID and display
 // name; lister failure is non-fatal — unresolved groups are simply skipped.
 //
-// Slug collisions (two lists sanitizing to the same slug) resolve to whichever
-// list lands in the map last. This is a deliberate trade-off accepted when the
-// group-name format was shortened from "AWG_<num>_<slug>_pN" to "AWG_<slug>_pN".
+// Слаг — dnsroute.ListGroupSlug: у NDMS-списков сохранённый и уникальный
+// (F694). Совпасть с ним может только HR-список — слага у него нет, берётся
+// правило по имени, а в List() HR-списки идут последними, так что при
+// совпадении в карте остаётся HR-список.
 func buildIPRuleMap(ctx context.Context, groups []runtimeGroup, lister DNSListLister) map[string][]RuleHit {
 	type listRef struct{ id, name string }
 	slugs := make(map[string]listRef)
 	if lister != nil {
 		if lists, err := lister.List(ctx); err == nil {
 			for _, l := range lists {
-				slugs[dnsroute.GroupSlug(l.ID, l.Name)] = listRef{id: l.ID, name: l.Name}
+				slugs[dnsroute.ListGroupSlug(&l)] = listRef{id: l.ID, name: l.Name}
 			}
 		}
 	}

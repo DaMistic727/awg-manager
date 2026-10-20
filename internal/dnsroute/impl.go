@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -177,7 +178,7 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 		return s.createHydraRoute(ctx, list)
 	}
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return nil, fmt.Errorf("store not loaded")
 	}
@@ -196,6 +197,7 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	list.ID = nextListID(data.Lists)
+	assignGroupSlug(&list, data.Lists)
 	list.Enabled = true
 	list.CreatedAt = now
 	list.UpdatedAt = now
@@ -213,8 +215,11 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 	if err := s.resolveRouteInterfaces(ctx, list.Routes); err != nil {
 		return nil, fmt.Errorf("resolve routes: %w", err)
 	}
+	if err := checkRouteInterfacesUnique(list.Routes); err != nil {
+		return nil, err
+	}
 
-	s.dedup(&list)
+	s.dedup(data, &list)
 
 	data.Lists = append(data.Lists, list)
 
@@ -228,9 +233,13 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 	// Content-Type, unreachable, etc.), reject the entire Create.
 	if len(list.Subscriptions) > 0 {
 		if err := s.validateSubscriptions(ctx, &list, list.Subscriptions); err != nil {
-			// Remove the just-appended list from data.
-			data.Lists = data.Lists[:len(data.Lists)-1]
-			_ = s.store.Save(data)
+			// Remove the just-appended list. После записи data — сам кэш:
+			// откат правит свой черновик, а не кэш на месте (F695).
+			rollback := s.store.Draft()
+			rollback.Lists = slices.DeleteFunc(rollback.Lists, func(l DomainList) bool { return l.ID == list.ID })
+			if serr := s.store.Save(rollback); serr != nil {
+				s.logError("create", list.ID, "Rollback save failed", serr.Error())
+			}
 			return nil, err
 		}
 		if err := s.refreshSubscriptions(ctx, list.ID); err != nil {
@@ -243,11 +252,12 @@ func (s *ServiceImpl) Create(ctx context.Context, list DomainList) (*DomainList,
 	}
 
 	// Re-read the list after refresh (Domains may have been updated).
-	// Копия: ответ кодируется вне opMu, а обновление подписок пишет в кэш
-	// на месте (F667).
-	for i := range data.Lists {
-		if data.Lists[i].ID == list.ID {
-			l := data.Lists[i].clone()
+	// Из кэша: обновление подписок записало свой черновик, data устарел
+	// (F695). Копия: ответ кодируется вне opMu (F667).
+	cur := s.store.GetCached()
+	for i := range cur.Lists {
+		if cur.Lists[i].ID == list.ID {
+			l := cur.Lists[i].clone()
 			return &l, nil
 		}
 	}
@@ -312,7 +322,7 @@ func (s *ServiceImpl) Update(ctx context.Context, list DomainList) (*DomainList,
 		return s.updateHydraRoute(ctx, list.ID, list)
 	}
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return nil, fmt.Errorf("store not loaded")
 	}
@@ -336,6 +346,7 @@ func (s *ServiceImpl) Update(ctx context.Context, list DomainList) (*DomainList,
 	// Preserve fields not sent by the frontend update payload.
 	list.CreatedAt = existing.CreatedAt
 	list.ID = existing.ID
+	list.GroupSlug = existing.GroupSlug
 	list.Enabled = existing.Enabled
 	list.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 
@@ -425,8 +436,11 @@ func (s *ServiceImpl) Update(ctx context.Context, list DomainList) (*DomainList,
 	if err := s.resolveRouteInterfaces(ctx, list.Routes); err != nil {
 		return nil, fmt.Errorf("resolve routes: %w", err)
 	}
+	if err := checkRouteInterfacesUnique(list.Routes); err != nil {
+		return nil, err
+	}
 
-	s.dedup(&list)
+	s.dedup(data, &list)
 
 	data.Lists[idx] = list
 
@@ -462,7 +476,7 @@ func (s *ServiceImpl) Delete(ctx context.Context, id string) error {
 		return s.hydra.DeleteGroups([]hydraroute.GroupRef{ref})
 	}
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return fmt.Errorf("store not loaded")
 	}
@@ -528,7 +542,7 @@ func (s *ServiceImpl) DeleteBatch(ctx context.Context, ids []string) (int, error
 		hrDeleted = len(hrRefs)
 	}
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return hrDeleted, fmt.Errorf("store not loaded")
 	}
@@ -572,7 +586,7 @@ func (s *ServiceImpl) CreateBatch(ctx context.Context, lists []DomainList) ([]*D
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return nil, fmt.Errorf("store not loaded")
 	}
@@ -582,6 +596,11 @@ func (s *ServiceImpl) CreateBatch(ctx context.Context, lists []DomainList) ([]*D
 	var hrCreated []*DomainList
 	hasSubs := false
 
+	// Первый проход — без побочных эффектов: нормализация, пропуски и
+	// проверки маршрутов всех списков. Ошибка любого списка отвергает батч
+	// целиком до записи HR-файлов и правки кэша (F693): иначе ранние списки
+	// оставались в живом кэше и доезжали до роутера со следующим Save.
+	prepared := make([]DomainList, 0, len(lists))
 	for _, list := range lists {
 		applyManualText(&list)
 		applyExcludesText(&list)
@@ -594,6 +613,27 @@ func (s *ServiceImpl) CreateBatch(ctx context.Context, lists []DomainList) ([]*D
 			if len(list.ManualDomains) == 0 {
 				continue
 			}
+			prepared = append(prepared, list)
+			continue
+		}
+		if strings.TrimSpace(list.Name) == "" {
+			continue
+		}
+		if len(list.ManualDomains) == 0 && len(list.Subscriptions) == 0 {
+			continue
+		}
+
+		if err := s.resolveRouteInterfaces(ctx, list.Routes); err != nil {
+			return nil, fmt.Errorf("resolve routes for %q: %w", list.Name, err)
+		}
+		if err := checkRouteInterfacesUnique(list.Routes); err != nil {
+			return nil, fmt.Errorf("%q: %w", list.Name, err)
+		}
+		prepared = append(prepared, list)
+	}
+
+	for _, list := range prepared {
+		if isHydraRoute(list.Backend) {
 			if len(list.Subscriptions) > 0 {
 				s.logInfo("create-batch", list.Name, "HR rule: subscriptions unsupported, ignored")
 			}
@@ -605,24 +645,15 @@ func (s *ServiceImpl) CreateBatch(ctx context.Context, lists []DomainList) ([]*D
 			hrCreated = append(hrCreated, dl)
 			continue
 		}
-		if strings.TrimSpace(list.Name) == "" {
-			continue
-		}
-		if len(list.ManualDomains) == 0 && len(list.Subscriptions) == 0 {
-			continue
-		}
 
 		list.ID = nextListID(data.Lists)
+		assignGroupSlug(&list, data.Lists)
 		list.Enabled = true
 		list.CreatedAt = now
 		list.UpdatedAt = now
 		list.Domains = deduplicateDomains(list.ManualDomains)
 
-		if err := s.resolveRouteInterfaces(ctx, list.Routes); err != nil {
-			return nil, fmt.Errorf("resolve routes for %q: %w", list.Name, err)
-		}
-
-		s.dedup(&list)
+		s.dedup(data, &list)
 		data.Lists = append(data.Lists, list)
 		createdIDs = append(createdIDs, list.ID)
 		s.appLog.Info("create", list.ID, "list created: "+list.Name)
@@ -660,15 +691,17 @@ func (s *ServiceImpl) CreateBatch(ctx context.Context, lists []DomainList) ([]*D
 		}
 	}
 
-	// Collect created lists from data (may have been updated by refreshSubscriptions).
+	// Collect created lists from the cache (may have been updated by
+	// refreshSubscriptions, which saves its own draft — F695).
+	cur := s.store.GetCached()
 	result := make([]*DomainList, 0, len(createdIDs))
 	idSet := make(map[string]bool, len(createdIDs))
 	for _, id := range createdIDs {
 		idSet[id] = true
 	}
-	for i := range data.Lists {
-		if idSet[data.Lists[i].ID] {
-			result = append(result, &data.Lists[i])
+	for i := range cur.Lists {
+		if idSet[cur.Lists[i].ID] {
+			result = append(result, &cur.Lists[i])
 		}
 	}
 
@@ -696,7 +729,7 @@ func (s *ServiceImpl) SetEnabled(ctx context.Context, id string, enabled bool) e
 		return nil
 	}
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return fmt.Errorf("store not loaded")
 	}
@@ -777,7 +810,7 @@ func (s *ServiceImpl) RefreshSubscriptions(ctx context.Context, id string) error
 }
 
 func (s *ServiceImpl) refreshSubscriptions(ctx context.Context, id string) error {
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return fmt.Errorf("store not loaded")
 	}
@@ -827,7 +860,7 @@ func (s *ServiceImpl) refreshSubscriptions(ctx context.Context, id string) error
 		return err
 	}
 	list.Domains, list.Subnets = domains, subnets
-	s.dedup(list)
+	s.dedup(data, list)
 	list.UpdatedAt = now
 
 	if err := s.store.Save(data); err != nil {
@@ -894,7 +927,7 @@ func (s *ServiceImpl) OnTunnelDelete(ctx context.Context, tunnelID string) error
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 
-	data := s.store.GetCached()
+	data := s.store.Draft()
 	if data == nil {
 		return nil
 	}
@@ -968,7 +1001,7 @@ func tunnelRouteRefs(list *DomainList, iface string) []command.DNSRouteRef {
 	n := len(chunkWithReserve(items, MaxDomainsPerGroup, len(excludes)))
 	refs := make([]command.DNSRouteRef, 0, n)
 	for i := 1; i <= n; i++ {
-		refs = append(refs, command.DNSRouteRef{Group: buildGroupName(list.ID, list.Name, i), Interface: iface})
+		refs = append(refs, command.DNSRouteRef{Group: buildGroupName(ListGroupSlug(list), i), Interface: iface})
 	}
 	return refs
 }
@@ -1008,14 +1041,29 @@ func (s *ServiceImpl) resolveRouteInterfaces(ctx context.Context, routes []Route
 	return nil
 }
 
+// checkRouteInterfacesUnique отвергает маршруты, где интерфейс указан дважды.
+// NDMS держит одну строку dns-proxy route на пару (группа, интерфейс): повторная
+// запись лишь обновляет её, и цель сверки никогда не сошлась бы с роутером (F691).
+// Идентичность — разрешённый RouteTarget.Interface, поэтому вызывать после
+// resolveRouteInterfaces.
+func checkRouteInterfacesUnique(routes []RouteTarget) error {
+	seen := make(map[string]bool, len(routes))
+	for _, rt := range routes {
+		if seen[rt.Interface] {
+			return fmt.Errorf("интерфейс %s указан в маршрутах дважды", rt.Interface)
+		}
+		seen[rt.Interface] = true
+	}
+	return nil
+}
+
 // dedup runs domain and subnet deduplication for the given list against all other lists.
 // It modifies list.Domains and list.Subnets in place and sets list.LastDedupeReport.
-func (s *ServiceImpl) dedup(list *DomainList) {
-	data := s.store.GetCached()
-	if data == nil {
-		return
-	}
-
+//
+// data — черновик, в который ляжет list (Store.Draft): индекс строится по
+// нему, а не по кэшу, — списки, уже добавленные тем же CreateBatch, в кэш
+// до записи не попадают, но дубли с ними отсекаются, как прежде.
+func (s *ServiceImpl) dedup(data *StoreData, list *DomainList) {
 	// Build index from all lists except the current one.
 	idx := BuildIndex(data.Lists, list.ID)
 	names := listNameMap(data.Lists)
