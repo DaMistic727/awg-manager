@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -80,6 +81,9 @@ func (s *ServiceImpl) UpdateSettings(ctx context.Context, sr storage.SingboxRout
 	// Персист-окно под transitionMu: см. ErrTransitionInProgress. Reconcile
 	// ниже остаётся ВНЕ окна — он сам берёт transitionMu через TryLock и под
 	// нашим локом молча съел бы тик (мьютекс нерекурсивный).
+	// Сбой переноса настроек в слот не отменяет уже сохранённое и не
+	// пропускает остальные шаги — его возвращаем в конце.
+	var reapplyErr error
 	settings, err := func() (*storage.Settings, error) {
 		if !s.transitionMu.TryLock() {
 			return nil, ErrTransitionInProgress
@@ -165,7 +169,12 @@ func (s *ServiceImpl) UpdateSettings(ctx context.Context, sr storage.SingboxRout
 			}
 			return nil, err
 		}
-		return s.deps.Settings.Get()
+		saved, err := s.deps.Settings.Get()
+		if err != nil {
+			return nil, err
+		}
+		reapplyErr = s.reapplyRouterSettings(ctx, saved.SingboxRouter)
+		return saved, nil
 	}()
 	if err != nil {
 		return err
@@ -185,7 +194,34 @@ func (s *ServiceImpl) UpdateSettings(ctx context.Context, sr storage.SingboxRout
 	// снятие пресета молча не доехало бы. Повторный вызов из Reconcile —
 	// no-op (набор уже совпадает).
 	s.syncKeenDNSPreset(ctx, normalized)
-	return s.Reconcile(ctx)
+	return errors.Join(reapplyErr, s.Reconcile(ctx))
+}
+
+// reapplyRouterSettings переносит в применённый 20-router.json включённого
+// tproxy/policy-tun то, чем в нём владеют настройки: выбор WAN (F703) и
+// системные правила со сниффером (F704). Ensure* иначе звучат только на
+// Enable, и сохранённое не доезжало до sing-box до выключения/включения
+// режима. Байт-идентичный результат persistSlotDirect не пишет. Слот ещё не
+// поднят (окно провижининга) — пропуск: всё выставит сам Enable. Зовётся и
+// из Reconcile: долечивает состояние, сохранённое до мгновенного применения.
+func (s *ServiceImpl) reapplyRouterSettings(ctx context.Context, sr storage.SingboxRouterSettings) error {
+	mode := sr.RoutingMode
+	if mode == "" {
+		mode = stateTProxy // legacy-дефолт, как в currentState
+	}
+	if s.deps.Orch == nil || !sr.Enabled || (mode != stateTProxy && mode != statePolicyTun) {
+		return nil
+	}
+	if !s.routerSlotEnabled() {
+		return nil
+	}
+	cfg, err := s.loadAppliedRouterConfig()
+	if err != nil {
+		return err
+	}
+	cfg.EnsureSystemRules(sr.SnifferEnabled)
+	cfg.EnsureRouteWAN(sr.WANAutoDetect, sr.WANInterface)
+	return s.persistConfigDirect(ctx, cfg)
 }
 
 // reapplyFakeIPOverlay перегенерирует fakeip-overlay на ВКЛЮЧЁННОМ и

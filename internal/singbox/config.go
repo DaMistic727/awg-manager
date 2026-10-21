@@ -100,6 +100,58 @@ func (c *Config) routeRules() []any {
 	return rules
 }
 
+func (c *Config) dnsServers() []any {
+	dns, _ := c.raw["dns"].(map[string]any)
+	v, _ := dns["servers"].([]any)
+	return v
+}
+
+// setDNSServers пишет dns.servers; пустой список вместе с опустевшим блоком
+// dns убирается — слот без своих серверов не несёт ключ dns вовсе.
+func (c *Config) setDNSServers(v []any) {
+	dns, _ := c.raw["dns"].(map[string]any)
+	if len(v) == 0 {
+		if dns != nil {
+			delete(dns, "servers")
+			if len(dns) == 0 {
+				delete(c.raw, "dns")
+			}
+		}
+		return
+	}
+	if dns == nil {
+		dns = map[string]any{}
+		c.raw["dns"] = dns
+	}
+	dns["servers"] = v
+}
+
+func (c *Config) upsertDNSServer(tag string, server map[string]any) {
+	servers := c.dnsServers()
+	for i, v := range servers {
+		if m, ok := v.(map[string]any); ok && m["tag"] == tag {
+			servers[i] = server
+			c.setDNSServers(servers)
+			return
+		}
+	}
+	c.setDNSServers(append(servers, server))
+}
+
+func (c *Config) removeDNSServers(drop func(tag string) bool) {
+	servers := c.dnsServers()
+	out := make([]any, 0, len(servers))
+	for _, v := range servers {
+		if m, ok := v.(map[string]any); ok {
+			if tag, _ := m["tag"].(string); drop(tag) {
+				continue
+			}
+		}
+		out = append(out, v)
+	}
+	c.setDNSServers(out)
+}
+
 func (c *Config) setInbounds(v []any)  { c.raw["inbounds"] = v }
 func (c *Config) setOutbounds(v []any) { c.raw["outbounds"] = v }
 func (c *Config) setRouteRules(v []any) {
@@ -756,6 +808,24 @@ func deviceProxyLANTag(id string) string {
 	return "device-proxy-" + id + "-lan"
 }
 
+// deviceProxyLANDNSTag — DNS-сервер инстанса: резолвер роутера на 127.0.0.1,
+// им device-proxy-lan резолвит LAN-имена (публичный резолвер их не знает).
+func deviceProxyLANDNSTag(id string) string { return deviceProxyLANTag(id) + "-dns" }
+
+func isDeviceProxyDNSServerTag(tag string) bool {
+	return strings.HasPrefix(tag, "device-proxy-") && strings.HasSuffix(tag, "-lan-dns")
+}
+
+// deviceProxyLANSuffixes / deviceProxyLANNameRegex — имена, которые
+// резолвятся только в LAN: зоны для локальных сетей, однословные имена и
+// собственные имена роутера (my.keenetic.net резолвится в адрес роутера,
+// не обязательно частный — ip_is_private его не ловит). Узко намеренно
+// (решение владельца 21.10): без .local (mDNS) и .internal — корпоративные
+// имена должны уходить в выбранный туннель.
+var deviceProxyLANSuffixes = []any{"lan", "home.arpa", "my.keenetic.net", "my.netcraze.net"}
+
+const deviceProxyLANNameRegex = "^[^.]+$"
+
 // isDeviceProxyOutboundTag — outbound'ы, которые слот прокси для устройств
 // создаёт сам: селектор и LAN-direct инстанса.
 func isDeviceProxyOutboundTag(tag string) bool {
@@ -841,10 +911,16 @@ func (c *Config) EnsureDeviceProxyInstance(spec DeviceProxyInstanceSpec) error {
 	// сокет к собственному адресу роутера привязывается к его интерфейсу, и
 	// на ядре Keenetic соединение висит до таймаута (F702, стенд 21.10).
 	lanTag := deviceProxyLANTag(spec.ID)
+	lanDNSTag := deviceProxyLANDNSTag(spec.ID)
+	// udp на 127.0.0.1, а не type:local: тот уводит .local в mDNS мультикастом
+	// во все интерфейсы, включая WAN. Адрес отправителя не нужен: к loopback
+	// sing-box сокет к интерфейсу не привязывает (control/bind.go, IsVirtual).
+	c.upsertDNSServer(lanDNSTag, map[string]any{"type": "udp", "tag": lanDNSTag, "server": "127.0.0.1"})
 	c.upsertOutbound(lanTag, map[string]any{
 		"type":               "direct",
 		"tag":                lanTag,
 		"inet4_bind_address": "0.0.0.0",
+		"domain_resolver":    lanDNSTag,
 	})
 
 	c.ensureDeviceProxyInstanceRouteRule(inboundTag, selectorTag, lanTag)
@@ -863,6 +939,8 @@ func (c *Config) RemoveDeviceProxyInstance(id string) {
 	c.removeInbound(inboundTag)
 	c.removeOutbound(selectorTag)
 	c.removeOutbound(deviceProxyLANTag(id))
+	lanDNSTag := deviceProxyLANDNSTag(id)
+	c.removeDNSServers(func(tag string) bool { return tag == lanDNSTag })
 	c.pruneAWGOutbounds(nil)
 	c.removeDeviceProxyInstanceRouteRule(inboundTag)
 }
@@ -901,6 +979,7 @@ func (c *Config) RemoveAllDeviceProxyInstances() {
 		nextOutbounds = append(nextOutbounds, v)
 	}
 	c.setOutbounds(nextOutbounds)
+	c.removeDNSServers(isDeviceProxyDNSServerTag)
 
 	rules := c.routeRules()
 	nextRules := make([]any, 0, len(rules))
@@ -969,6 +1048,13 @@ func (c *Config) ExtractDeviceProxy() *Config {
 		}
 		if t, _ := ob["tag"].(string); isDeviceProxyOutboundTag(t) {
 			out.upsertOutbound(t, ob)
+		}
+	}
+	for _, v := range c.dnsServers() {
+		if m, ok := v.(map[string]any); ok {
+			if t, _ := m["tag"].(string); isDeviceProxyDNSServerTag(t) {
+				out.upsertDNSServer(t, m)
+			}
 		}
 	}
 	for _, v := range c.routeRules() {
@@ -1095,6 +1181,25 @@ func (c *Config) ensureDeviceProxyInstanceRouteRule(inboundTag, selectorTag, lan
 		"ip_is_private": true,
 		"outbound":      lanTag,
 	}
+	// Loopback и unspecified-адреса роутера — не назначение для клиентов
+	// прокси (ip_is_private ниже включает и те, и другие).
+	rejectLoopback := map[string]any{
+		"inbound": inboundTag,
+		"ip_cidr": []any{"127.0.0.0/8", "::1/128", "0.0.0.0/32", "::/128"},
+		"action":  "reject",
+	}
+	rejectLocalhost := map[string]any{
+		"inbound":       inboundTag,
+		"domain_suffix": []any{"localhost"},
+		"action":        "reject",
+	}
+	// SOCKS5h/HTTP передают имя — ip_is_private по нему не сработает.
+	lanNames := map[string]any{
+		"inbound":       inboundTag,
+		"domain_suffix": deviceProxyLANSuffixes,
+		"domain_regex":  []any{deviceProxyLANNameRegex},
+		"outbound":      lanTag,
+	}
 	rule := map[string]any{
 		"inbound":  inboundTag,
 		"outbound": selectorTag,
@@ -1112,7 +1217,7 @@ func (c *Config) ensureDeviceProxyInstanceRouteRule(inboundTag, selectorTag, lan
 		}
 		filtered = append(filtered, v)
 	}
-	c.setRouteRules(append([]any{privateDirect, rule}, filtered...))
+	c.setRouteRules(append([]any{rejectLoopback, rejectLocalhost, lanNames, privateDirect, rule}, filtered...))
 }
 
 func (c *Config) removeDeviceProxyInstanceRouteRule(inboundTag string) {
