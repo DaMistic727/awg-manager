@@ -40,7 +40,7 @@ type singboxCore struct {
 	op        *singbox.Operator
 	orch      *singboxorch.Orchestrator
 	awg3Store *awg3endpoint.Store
-	migrated  bool // миграции (ruleset-URL, address-or, device-proxy) переписали файлы — runtime решает про reload
+	migrated  bool // миграции (ruleset-URL, address-or, device-proxy, порядок слотов) переписали файлы — runtime решает про reload
 }
 
 // buildSingboxCore собирает общую для демона и cleanup часть sing-box-рантайма:
@@ -87,11 +87,14 @@ func buildSingboxCore(d singboxCoreDeps) singboxCore {
 	}
 
 	// config.d orchestrator — the single writer of slot files (00-base /
-	// 10-tunnels / 15-awg / 20-router / 30-deviceproxy). Producers route
+	// 10-tunnels / 12-deviceproxy / 15-awg / 20-router / …). Producers route
 	// their writes through Save / SetEnabled so a "disabled" domain
 	// actually moves the file out of sing-box's view (config.d/disabled/)
 	// instead of leaving stale content behind.
 	singboxConfigDir := op.ConfigDir()
+	// Слоты привязок (F701) переименовал уже NewOperator — до своих шагов
+	// примирения; здесь только флаг для reload.
+	bindingSlotsMigrated := op.BindingSlotsMigrated()
 	deviceProxyMigrated, err := singbox.MigrateDeviceProxyOutOfTunnels(singboxConfigDir)
 	if err != nil {
 		d.bootLog.Warn("deviceproxy-migration", "", err.Error())
@@ -165,7 +168,7 @@ func buildSingboxCore(d singboxCoreDeps) singboxCore {
 		op:        op,
 		orch:      orch,
 		awg3Store: awg3Store,
-		migrated:  ruleSetURLsMigrated || addressOrMigrated || deviceProxyMigrated || dnsMatchSourceMigrated,
+		migrated:  ruleSetURLsMigrated || addressOrMigrated || deviceProxyMigrated || dnsMatchSourceMigrated || bindingSlotsMigrated,
 	}
 }
 
@@ -243,7 +246,7 @@ func (a *app) setupSingboxRuntime() {
 		// он здесь уже распаркован).
 	}
 
-	// Subscription service — owns 40-subscriptions.json in config.d.
+	// Subscription service — owns 13-subscriptions.json in config.d.
 	// Слот регистрирует цикл KnownSlots внутри buildSingboxCore, до
 	// Bootstrap; Register внутри NewOperatorAdapter — no-op дубль с той же
 	// meta (ErrSlotAlreadyRegistered там глотается, см. его докстринг).
