@@ -1,7 +1,8 @@
 import { m } from '$lib/i18n';
 import { DEFAULT_SUBSCRIPTION_URLTEST, type SingboxRouterOutbound } from '$lib/types';
+import type { WizardCompositeMode } from './addWizardStore';
 
-const COMPOSITE_TYPES = new Set(['selector', 'urltest', 'loadbalance']);
+const COMPOSITE_TYPES = new Set(['selector', 'urltest', 'loadbalance', 'fallback']);
 
 export function sameOutboundMemberSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -16,14 +17,27 @@ export function isCompositeOutboundType(type: string): boolean {
   return COMPOSITE_TYPES.has(type);
 }
 
-/** Ищет composite outbound с ровно тем же набором участников (порядок не важен). */
+/** Режим визарда для типа composite; legacy `loadbalance` и не-composite → undefined. */
+export function normalizeCompositeType(type: string): WizardCompositeMode | undefined {
+  if (type === 'selector' || type === 'urltest' || type === 'fallback') return type;
+  return undefined;
+}
+
+/** Ищет composite outbound с ровно тем же набором участников (и типом, если передан). */
 export function findMatchingComposite(
   outbounds: SingboxRouterOutbound[],
   tunnelTags: string[],
+  mode?: WizardCompositeMode,
 ): SingboxRouterOutbound | undefined {
   return outbounds.find((o) => {
     if (!isCompositeOutboundType(o.type)) return false;
+    const normalizedType = normalizeCompositeType(o.type);
+    if (mode && normalizedType !== mode) return false;
     const members = o.outbounds ?? [];
+    if (mode === 'fallback' || normalizedType === 'fallback') {
+      if (members.length !== tunnelTags.length) return false;
+      return members.every((m, idx) => m === tunnelTags[idx]);
+    }
     return sameOutboundMemberSet(members, tunnelTags);
   });
 }
@@ -40,25 +54,39 @@ export interface TunnelOutboundPreview {
   outboundTag: string;
   willCreate: boolean;
   tunnelCount: number;
+  mode?: WizardCompositeMode;
 }
 
 export type WizardOutboundCategory = 'tunnel' | 'direct' | 'block';
+
+function compositeModeLabel(mode?: WizardCompositeMode): string {
+  switch (mode) {
+    case 'fallback':
+      return m.sb_router_wizard_mode_fallback_label();
+    case 'selector':
+      return m.sb_router_wizard_mode_selector_label();
+    case 'urltest':
+    default:
+      return m.sb_router_wizard_mode_urltest_label();
+  }
+}
 
 /** Текст предпросмотра outbound на шаге 3 визарда. */
 export function formatTunnelOutboundPreview(preview: TunnelOutboundPreview): string {
   if (preview.tunnelCount === 1) {
     return m.sb_router_wizard_preview_route({ tag: preview.outboundTag });
   }
+  const modeSuffix = compositeModeLabel(preview.mode);
   if (preview.willCreate) {
-    return m.sb_router_wizard_preview_create_composite({
+    return `${m.sb_router_wizard_preview_create_composite({
       tag: preview.outboundTag,
       count: preview.tunnelCount,
-    });
+    })} — ${modeSuffix}`;
   }
-  return m.sb_router_wizard_preview_use_composite({
+  return `${m.sb_router_wizard_preview_use_composite({
     tag: preview.outboundTag,
     count: preview.tunnelCount,
-  });
+  })} — ${modeSuffix}`;
 }
 
 export function formatWizardOutboundPreview(
@@ -82,33 +110,51 @@ export function formatWizardOutboundPreview(
 export function previewTunnelOutboundResolution(
   tunnelTags: string[],
   outbounds: SingboxRouterOutbound[],
+  mode: WizardCompositeMode = 'urltest',
 ): TunnelOutboundPreview | null {
   if (tunnelTags.length === 0) return null;
   if (tunnelTags.length === 1) {
-    return { outboundTag: tunnelTags[0], willCreate: false, tunnelCount: 1 };
+    return { outboundTag: tunnelTags[0], willCreate: false, tunnelCount: 1, mode };
   }
-  const existing = findMatchingComposite(outbounds, tunnelTags);
+  const existing = findMatchingComposite(outbounds, tunnelTags, mode);
   if (existing) {
-    return { outboundTag: existing.tag, willCreate: false, tunnelCount: tunnelTags.length };
+    const existingMode = normalizeCompositeType(existing.type);
+    return {
+      outboundTag: existing.tag,
+      willCreate: false,
+      tunnelCount: tunnelTags.length,
+      mode: existingMode || mode,
+    };
   }
   const tags = outbounds.map((o) => o.tag);
   return {
     outboundTag: nextCustomCompositeTag(tags),
     willCreate: true,
     tunnelCount: tunnelTags.length,
+    mode,
   };
 }
 
 export function buildWizardCompositeOutbound(
   tag: string,
   tunnelTags: string[],
+  mode: WizardCompositeMode = 'urltest',
 ): SingboxRouterOutbound {
-  return {
-    type: 'urltest',
+  const base: SingboxRouterOutbound = {
+    type: mode,
     tag,
     outbounds: [...tunnelTags],
-    url: DEFAULT_SUBSCRIPTION_URLTEST.url,
-    interval: `${DEFAULT_SUBSCRIPTION_URLTEST.intervalSec}s`,
-    tolerance: DEFAULT_SUBSCRIPTION_URLTEST.toleranceMs,
   };
+  if (mode === 'urltest') {
+    base.url = DEFAULT_SUBSCRIPTION_URLTEST.url;
+    base.interval = `${DEFAULT_SUBSCRIPTION_URLTEST.intervalSec}s`;
+    base.tolerance = DEFAULT_SUBSCRIPTION_URLTEST.toleranceMs;
+  } else if (mode === 'fallback') {
+    base.url = DEFAULT_SUBSCRIPTION_URLTEST.url;
+    base.interval = `${DEFAULT_SUBSCRIPTION_URLTEST.intervalSec}s`;
+    base.interrupt_exist_connections = true;
+  } else if (mode === 'selector') {
+    base.default = tunnelTags[0];
+  }
+  return base;
 }

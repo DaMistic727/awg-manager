@@ -2044,8 +2044,7 @@
 	"subscriptions_active_show_ip": "Показать IP",
 	"subscriptions_active_hide_server_ip": "Скрыть IP сервера",
 	"subscriptions_active_show_server_ip": "Показать IP сервера",
-	"subscriptions_active_urltest_info": "Включён автовыбор (URLTest). Чтобы выбирать сервер вручную, откройте подписку → вкладка «Настройки» → режим «Вручную».",
-	"subscriptions_active_urltest_title": "Sing-box выбирает самый быстрый сервер автоматически",
+	"subscriptions_active_urltest_info": "Сервер выбирает sing-box (режим {mode}). Чтобы выбирать сервер вручную, откройте подписку → вкладка «Настройки» → режим «Вручную».",
 	"subscriptions_form_name": "Название",
 	"subscriptions_form_mode": "Режим выбора сервера",
 	"subscriptions_form_mode_urltest_title": "Автовыбор по скорости",
@@ -2143,7 +2142,7 @@
 	"subscriptions_members_extra_rejected": "+{count} отклонённых",
 	"subscriptions_members_after_refresh": "После обновления: {items}",
 	"subscriptions_members_refresh_failed": "Не удалось обновить",
-	"subscriptions_members_urltest_notice": "Включён автовыбор (URLTest). Чтобы переключать сервер вручную, откройте вкладку «Настройки» этой подписки и выберите режим «Вручную».",
+	"subscriptions_members_urltest_notice": "Сервер выбирает sing-box (режим {mode}). Чтобы переключать сервер вручную, откройте вкладку «Настройки» этой подписки и выберите режим «Вручную».",
 	"subscriptions_members_clear_orphans_failed": "Не удалось очистить сироты",
 	"subscriptions_members_exclude_failed": "Не удалось исключить",
 	"subscriptions_members_selected_of": "Выбрано {selected} из {total}",
@@ -7796,5 +7795,21 @@
 			}
 		}
 	],
-	"zapret_strategy_reordered": "Стратегия перемещена с позиции {from} на {to}"
+	"zapret_strategy_reordered": "Стратегия перемещена с позиции {from} на {to}",
+	"routing_singbox_outbound_desc_fallback": "Использует первый доступный сервер по порядку списка. При падении автоматически переключается на следующий.",
+	"sb_router_wizard_composite_group_mode": "Режим группы туннелей",
+	"sb_router_wizard_tunnels_count": "{count} туннеля",
+	"sb_router_wizard_mode_urltest": "Автовыбор",
+	"sb_router_wizard_mode_fallback": "Резерв",
+	"sb_router_wizard_mode_selector": "Селектор",
+	"sb_router_wizard_mode_urltest_desc": "Автоматически направляет трафик через самый быстрый туннель (проверка задержки).",
+	"sb_router_wizard_mode_fallback_desc": "Использует первый рабочий туннель в списке; при отказе переключает на следующий.",
+	"sb_router_wizard_mode_selector_desc": "Ручной выбор активного туннеля через селектор в панели.",
+	"sb_router_wizard_mode_urltest_label": "автовыбор по скорости",
+	"sb_router_wizard_mode_fallback_label": "резерв с переключением",
+	"sb_router_wizard_mode_selector_label": "ручной выбор",
+	"subscriptions_form_mode_fallback_title": "Fallback (Резерв)",
+	"subscriptions_form_mode_fallback_desc": "Первый живой узел по списку; при отказе переход на следующий.",
+	"routing_singbox_outbound_move_up_prio": "Поднять выше (к #1)",
+	"routing_singbox_outbound_move_down_prio": "Опустить ниже"
 }

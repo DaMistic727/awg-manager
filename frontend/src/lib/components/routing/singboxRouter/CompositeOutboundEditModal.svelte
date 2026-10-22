@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { m } from '$lib/i18n';
 	import { Button, Dropdown, SegmentedControl, type DropdownOption } from '$lib/components/ui';
-	import { X } from 'lucide-svelte';
+	import { X, ChevronUp, ChevronDown } from 'lucide-svelte';
 	import type { SegmentedOption } from '$lib/components/ui/segmentedControl';
 	import SingboxSettingsModal from './SingboxSettingsModal.svelte';
 	import ForeignIfacePanel from './ForeignIfacePanel.svelte';
@@ -13,10 +13,11 @@
 	import { api } from '$lib/api/client';
 	import { bindInterfaceLabel, directBindChoices } from '$lib/utils/bindInterface';
 
-	// Only urltest and selector are offered for new groups — `loadbalance`
-	// was removed in sing-box 1.13+ and FATALs on startup if present. Legacy
-	// loadbalance entries that may exist in older 20-router.json files are
-	// still tolerated at read time. When the user edits such an entry through
+	// Only urltest, fallback and selector are offered for new groups —
+	// `loadbalance` was removed in sing-box 1.13+ and FATALs on startup if
+	// present (fallback is our fork's group, awgm.34+). Legacy loadbalance
+	// entries that may exist in older 20-router.json files are still
+	// tolerated at read time. When the user edits such an entry through
 	// this modal, the type narrows to urltest on open — that's a deliberate
 	// one-way migration, not an accidental data loss.
 
@@ -30,10 +31,14 @@
 	}
 	let { outbound, outbounds, outboundOptions, onClose, onSave }: Props = $props();
 
+	type OutboundType = 'urltest' | 'fallback' | 'selector' | 'direct';
+
+	function editableType(t: SingboxRouterOutbound['type'] | undefined): OutboundType {
+		return t === 'selector' || t === 'direct' || t === 'fallback' ? t : 'urltest';
+	}
+
 	// svelte-ignore state_referenced_locally
-	let type: 'urltest' | 'selector' | 'direct' = $state(
-		outbound?.type === 'selector' ? 'selector' : outbound?.type === 'direct' ? 'direct' : 'urltest'
-	);
+	let type: OutboundType = $state(editableType(outbound?.type));
 	// svelte-ignore state_referenced_locally
 	let tag = $state(outbound?.tag ?? '');
 	// svelte-ignore state_referenced_locally
@@ -92,7 +97,7 @@
 	let memberPicker = $state('');
 
 	// Snapshot initial state for isDirty detection
-	let initialType: 'urltest' | 'selector' | 'direct' = $state('urltest');
+	let initialType: OutboundType = $state('urltest');
 	let initialTag = $state('');
 	let initialMembers = $state<string[]>([]);
 	let initialUrl = $state('https://www.gstatic.com/generate_204');
@@ -104,7 +109,7 @@
 	// Initialize snapshot when modal opens
 	$effect(() => {
 		if (outbound) {
-			initialType = outbound.type === 'selector' ? 'selector' : outbound.type === 'direct' ? 'direct' : 'urltest';
+			initialType = editableType(outbound.type);
 			initialTag = outbound.tag;
 			initialMembers = [...(outbound.outbounds ?? [])];
 			initialUrl = outbound.url ?? 'https://www.gstatic.com/generate_204';
@@ -187,6 +192,15 @@
 		memberPicker = '';
 	}
 
+	function moveMember(index: number, direction: -1 | 1): void {
+		if (isSubscription) return;
+		const target = index + direction;
+		if (target < 0 || target >= members.length) return;
+		const next = [...members];
+		[next[index], next[target]] = [next[target], next[index]];
+		members = next;
+	}
+
 	function removeMember(v: string): void {
 		if (isSubscription) return;
 		members = members.filter((mem) => mem !== v);
@@ -231,6 +245,10 @@
 					built.url = url;
 					built.interval = interval;
 					built.tolerance = tolerance;
+				} else if (type === 'fallback') {
+					built.url = url;
+					built.interval = interval;
+					built.interrupt_exist_connections = true;
 				} else {
 					built.default = defaultOutbound || members[0];
 				}
@@ -244,10 +262,9 @@
 		}
 	}
 
-	type OutboundType = 'urltest' | 'selector' | 'direct';
-
 	const typeOptions = $derived<SegmentedOption<OutboundType>[]>([
 		{ value: 'urltest', label: 'URLTest', disabled: !!outbound && outbound.type === 'direct' },
+		{ value: 'fallback', label: 'Fallback', disabled: !!outbound && outbound.type === 'direct' },
 		{ value: 'selector', label: 'Selector', disabled: !!outbound && outbound.type === 'direct' },
 		{ value: 'direct', label: m.routing_singbox_outbound_type_interface(), disabled: !!outbound && outbound.type !== 'direct' },
 	]);
@@ -257,7 +274,9 @@
 			? m.routing_singbox_outbound_desc_direct()
 			: type === 'urltest'
 				? m.routing_singbox_outbound_desc_urltest()
-				: m.routing_singbox_outbound_desc_selector()
+				: type === 'fallback'
+					? m.routing_singbox_outbound_desc_fallback()
+					: m.routing_singbox_outbound_desc_selector()
 	);
 </script>
 
@@ -294,10 +313,40 @@
 					{#if members.length === 0}
 						<span class="chips-placeholder">{m.routing_singbox_outbound_members_none()}</span>
 					{:else}
-						{#each members as mem (mem)}
+						{#each members as mem, i (mem)}
 							<span class="member-chip" title={mem}>
+								{#if type === 'fallback'}
+									<span class="member-chip-order" class:primary={i === 0}>#{i + 1}</span>
+								{/if}
 								<span class="member-chip-label">{memberLabel(mem)}</span>
 								{#if !isSubscription}
+									{#if type === 'fallback'}
+										<!-- Порядок участников fallback — приоритет. -->
+										<span class="member-chip-nav-col">
+											{#if i > 0}
+												<button
+													type="button"
+													class="member-chip-nav"
+													aria-label={m.routing_singbox_outbound_move_up_prio()}
+													title={m.routing_singbox_outbound_move_up_prio()}
+													onclick={() => moveMember(i, -1)}
+												>
+													<ChevronUp size={11} />
+												</button>
+											{/if}
+											{#if i < members.length - 1}
+												<button
+													type="button"
+													class="member-chip-nav"
+													aria-label={m.routing_singbox_outbound_move_down_prio()}
+													title={m.routing_singbox_outbound_move_down_prio()}
+													onclick={() => moveMember(i, 1)}
+												>
+													<ChevronDown size={11} />
+												</button>
+											{/if}
+										</span>
+									{/if}
 									<button
 										type="button"
 										class="member-chip-remove"
@@ -326,7 +375,7 @@
 				{/if}
 			</div>
 
-			{#if type === 'urltest'}
+			{#if type === 'urltest' || type === 'fallback'}
 				<label class="field">
 					<div class="lbl">Test URL</div>
 					<input bind:value={url} />
@@ -336,12 +385,14 @@
 						<div class="lbl">Interval</div>
 						<input bind:value={interval} placeholder="3m" />
 					</label>
-					<label class="field">
-						<div class="lbl">Tolerance (ms)</div>
-						<input type="number" bind:value={tolerance} />
-					</label>
+					{#if type === 'urltest'}
+						<label class="field">
+							<div class="lbl">Tolerance (ms)</div>
+							<input type="number" bind:value={tolerance} />
+						</label>
+					{/if}
 				</div>
-			{:else}
+			{:else if type === 'selector'}
 				<div class="field">
 					<div class="lbl">{m.routing_singbox_outbound_default_label()}</div>
 					<Dropdown

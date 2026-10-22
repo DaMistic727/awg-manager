@@ -138,4 +138,28 @@ func TestBuildGroupOutbound_DispatchesByMode(t *testing.T) {
 	check(t, BuildGroupOutbound(subSel, members, "m1"), "selector")
 	check(t, BuildGroupOutbound(subUT, members, "m1"), "urltest")
 	check(t, BuildGroupOutbound(subEmpty, members, "m1"), "selector")
+
+	subFB := Subscription{SelectorTag: "sub-x", Mode: ModeFallback}
+	check(t, BuildGroupOutbound(subFB, members, "m1"), "fallback")
+}
+
+func TestBuildFallback(t *testing.T) {
+	members := []string{"m1", "m2"}
+	raw := BuildFallback("sub-fb", members, URLTestConfig{
+		URL:         "https://example.com/check",
+		IntervalSec: 3600,
+	})
+	var ob map[string]any
+	if err := json.Unmarshal(raw, &ob); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ob["type"] != "fallback" || ob["tag"] != "sub-fb" {
+		t.Errorf("wrong fallback outbound: %+v", ob)
+	}
+	if ob["interrupt_exist_connections"] != true {
+		t.Errorf("expected interrupt_exist_connections=true, got %v", ob["interrupt_exist_connections"])
+	}
+	if ob["idle_timeout"] != "7200s" {
+		t.Errorf("expected safe idle_timeout=7200s, got %v", ob["idle_timeout"])
+	}
 }

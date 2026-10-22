@@ -60,6 +60,10 @@ func preFilterOutbounds(outbounds []any, singboxFeatures []string) ([]any, []Dro
 	return kept, dropped
 }
 
+func isGroupOutbound(typ string) bool {
+	return typ == "selector" || typ == "urltest" || typ == "fallback"
+}
+
 // classifyOutbound returns "" when the outbound passes Pass 1 rules,
 // or a short human-readable reason string when it should be dropped.
 func classifyOutbound(ob map[string]any) string {
@@ -68,7 +72,7 @@ func classifyOutbound(ob map[string]any) string {
 		return "missing type"
 	}
 	// Group outbounds: validated after leaf cleanup; skip here.
-	if typ == "selector" || typ == "urltest" {
+	if isGroupOutbound(typ) {
 		return ""
 	}
 	// Аутбаунд hysteria2 с реле адреса не имеет по построению: sing-box берёт
@@ -168,7 +172,7 @@ func classifyOutbound(ob map[string]any) string {
 // update sing-box to a version supporting naive` (singbox.MissingBuildTagMsg).
 func classifyOutboundFeatureSupport(ob map[string]any, singboxFeatures []string) string {
 	typ, _ := ob["type"].(string)
-	if typ == "" || typ == "selector" || typ == "urltest" {
+	if typ == "" || isGroupOutbound(typ) {
 		return ""
 	}
 	required := singbox.OutboundTypeRequiresFeature(typ)
@@ -260,6 +264,27 @@ func subscriptionsOutboundIndex(res orchestrator.ValidationResult) (int, bool) {
 	return -1, false
 }
 
+// rejectedGroupErr — ошибка вместо дропа, когда движок отверг групповой
+// outbound. Группы в слоте собираем только мы (BuildGroupOutbound,
+// BuildAggregateGroupOutbound; группы из sing-box JSON vlink отбрасывает
+// при разборе), так что это не мусор подписки: выбросить её значит молча
+// снять маршрутизацию на подписку, а UI показывал бы режим включённым
+// (F714). Типичный случай — fallback на sing-box старше пина.
+func rejectedGroupErr(cfg *slotConfig, idx int, reason string) error {
+	if idx < 0 || idx >= len(cfg.Outbounds) {
+		return nil
+	}
+	ob, _ := cfg.Outbounds[idx].(map[string]any)
+	typ, _ := ob["type"].(string)
+	if !isGroupOutbound(typ) {
+		return nil
+	}
+	if strings.Contains(reason, "unknown outbound type") {
+		return fmt.Errorf("%w: установленный sing-box не поддерживает группы типа %q — обновите sing-box", ErrValidation, typ)
+	}
+	return fmt.Errorf("%w: sing-box отверг группу %q: %s", ErrValidation, outboundTag(ob), reason)
+}
+
 // dropOutboundAndCleanRefs removes the outbound at index `idx` from cfg
 // and cascades the cleanup: any selector / urltest / route rule that
 // referenced its tag is updated (tag removed from outbound lists,
@@ -293,7 +318,7 @@ func cleanReferencesToTag(cfg *slotConfig, tag string) {
 			continue
 		}
 		typ, _ := ob["type"].(string)
-		if typ != "selector" && typ != "urltest" {
+		if !isGroupOutbound(typ) {
 			i++
 			continue
 		}

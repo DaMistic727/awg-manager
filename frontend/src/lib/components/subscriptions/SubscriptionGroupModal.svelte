@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isAutoSelectMode } from '$lib/utils/subscriptionMode';
 	import { subscriptionName } from '$lib/utils/subscriptionMember';
 	import { m } from '$lib/i18n';
 	import {
@@ -84,7 +85,7 @@
 				label: label.trim(),
 				mode,
 				urlTest:
-					mode === 'urltest'
+					isAutoSelectMode(mode)
 						? { url: utUrl, intervalSec: utIntervalSec, toleranceMs: utToleranceMs }
 						: undefined,
 				useSubscriptionIds: selectedIds,
@@ -179,8 +180,19 @@
 					<div class="mode-title">{m.subscriptions_form_mode_selector_title()}</div>
 					<div class="mode-desc">{m.subscriptions_form_mode_selector_desc()}</div>
 				</button>
+				<button
+					type="button"
+					role="radio"
+					aria-checked={mode === 'fallback'}
+					class="mode-card"
+					class:selected={mode === 'fallback'}
+					onclick={() => (mode = 'fallback')}
+				>
+					<div class="mode-title">{m.subscriptions_form_mode_fallback_title()}</div>
+					<div class="mode-desc">{m.subscriptions_form_mode_fallback_desc()}</div>
+				</button>
 			</div>
-			{#if mode === 'urltest'}
+			{#if isAutoSelectMode(mode)}
 				<div class="urltest-block">
 					<label class="row">
 						<span class="lbl">{m.subscriptions_form_check_url()}</span>
@@ -196,10 +208,12 @@
 							<span class="lbl">{m.subscriptions_form_interval()}</span>
 							<input class="inp" type="number" min="10" max="3600" bind:value={utIntervalSec} />
 						</label>
-						<label class="ut-col">
-							<span class="lbl">{m.subscriptions_form_tolerance()}</span>
-							<input class="inp" type="number" min="0" max="2000" bind:value={utToleranceMs} />
-						</label>
+						{#if mode === 'urltest'}
+							<label class="ut-col">
+								<span class="lbl">{m.subscriptions_form_tolerance()}</span>
+								<input class="inp" type="number" min="0" max="2000" bind:value={utToleranceMs} />
+							</label>
+						{/if}
 					</div>
 				</div>
 			{/if}

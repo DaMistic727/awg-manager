@@ -569,10 +569,10 @@ func TestEnsureSystemRules_LegacyHijackRecognized(t *testing.T) {
 func TestCompositeOutboundRejectsDirectMember(t *testing.T) {
 	cfg := NewEmptyConfig()
 
-	// Add: direct as member rejected.
+	// Add: direct as member rejected for urltest.
 	err := cfg.AddCompositeOutbound(Outbound{Tag: "auto", Type: "urltest", Outbounds: []string{"awg10", "direct"}})
-	if err == nil || !contains(err.Error(), "not allowed in composite groups") {
-		t.Errorf("expected 'not allowed' error for direct member, got %v", err)
+	if err == nil || !contains(err.Error(), "not allowed in urltest groups") {
+		t.Errorf("expected 'not allowed in urltest groups' error for direct member, got %v", err)
 	}
 
 	// Add: case-insensitive direct also rejected.
@@ -581,10 +581,20 @@ func TestCompositeOutboundRejectsDirectMember(t *testing.T) {
 		t.Error("expected case-insensitive direct to be rejected")
 	}
 
-	// Add: direct as default rejected.
-	err = cfg.AddCompositeOutbound(Outbound{Tag: "auto", Type: "selector", Outbounds: []string{"awg10"}, Default: "direct"})
+	// Add: direct as default rejected for urltest.
+	err = cfg.AddCompositeOutbound(Outbound{Tag: "auto", Type: "urltest", Outbounds: []string{"awg10"}, Default: "direct"})
 	if err == nil || !contains(err.Error(), "default") {
 		t.Errorf("expected 'default' error for direct default, got %v", err)
+	}
+
+	// Add: fallback and selector allow direct as member.
+	err = cfg.AddCompositeOutbound(Outbound{Tag: "fb", Type: "fallback", Outbounds: []string{"awg10", "direct"}})
+	if err != nil {
+		t.Errorf("expected fallback to allow direct member, got %v", err)
+	}
+	err = cfg.AddCompositeOutbound(Outbound{Tag: "sel", Type: "selector", Outbounds: []string{"awg10", "direct"}, Default: "direct"})
+	if err != nil {
+		t.Errorf("expected selector to allow direct member and default, got %v", err)
 	}
 
 	// Empty members rejected.
@@ -827,5 +837,42 @@ func TestNormalizeSingboxRouterSettings_DeviceMode(t *testing.T) {
 				t.Fatalf("DeviceMode = %q, want %q", got.DeviceMode, c.want)
 			}
 		})
+	}
+}
+
+// sing-box отвергает группу с interval > idle_timeout (по умолчанию 30m).
+func TestCompositeOutboundIdleTimeoutGuard(t *testing.T) {
+	cfg := NewEmptyConfig()
+	if err := cfg.AddCompositeOutbound(Outbound{Tag: "long", Type: "fallback", Outbounds: []string{"awg10"}, Interval: "1h"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.AddCompositeOutbound(Outbound{Tag: "short", Type: "urltest", Outbounds: []string{"awg10"}, Interval: "3m"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.AddCompositeOutbound(Outbound{Tag: "day", Type: "urltest", Outbounds: []string{"awg10"}, Interval: "1d"}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, o := range cfg.Outbounds {
+		got[o.Tag] = o.IdleTimeout
+	}
+	if got["long"] != "7200s" {
+		t.Errorf("interval 1h: idle_timeout = %q, want 7200s", got["long"])
+	}
+	if got["day"] != "172800s" {
+		t.Errorf("interval 1d: idle_timeout = %q, want 172800s", got["day"])
+	}
+	if got["short"] != "" {
+		t.Errorf("interval 3m: idle_timeout = %q, want empty", got["short"])
+	}
+}
+
+// F715: тип группы — закрытое множество; legacy loadbalance роняет sing-box.
+func TestCompositeOutboundRejectsUnknownType(t *testing.T) {
+	cfg := NewEmptyConfig()
+	for _, typ := range []string{"loadbalance", "load-balance", "URLTest", ""} {
+		if err := cfg.AddCompositeOutbound(Outbound{Tag: "g", Type: typ, Outbounds: []string{"awg10"}}); err == nil || !contains(err.Error(), "unsupported group type") {
+			t.Errorf("type %q: err = %v, want unsupported group type", typ, err)
+		}
 	}
 }

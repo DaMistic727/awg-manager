@@ -1984,8 +1984,7 @@
 	"subscriptions_active_show_ip": "Show IP",
 	"subscriptions_active_hide_server_ip": "Hide server IP",
 	"subscriptions_active_show_server_ip": "Show server IP",
-	"subscriptions_active_urltest_info": "Auto-select (URLTest) is on. To pick a server manually, open the subscription → \"Settings\" tab → \"Manual\" mode.",
-	"subscriptions_active_urltest_title": "Sing-box picks the fastest server automatically",
+	"subscriptions_active_urltest_info": "sing-box picks the server ({mode} mode). To pick a server manually, open the subscription → \"Settings\" tab → \"Manual\" mode.",
 	"subscriptions_form_name": "Name",
 	"subscriptions_form_mode": "Server selection mode",
 	"subscriptions_form_mode_urltest_title": "Auto-select by speed",
@@ -2079,7 +2078,7 @@
 	"subscriptions_members_extra_rejected": "+{count} rejected",
 	"subscriptions_members_after_refresh": "After refresh: {items}",
 	"subscriptions_members_refresh_failed": "Failed to refresh",
-	"subscriptions_members_urltest_notice": "Auto-select (URLTest) is on. To switch the server manually, open the \"Settings\" tab of this subscription and choose \"Manual\" mode.",
+	"subscriptions_members_urltest_notice": "sing-box picks the server ({mode} mode). To switch the server manually, open the \"Settings\" tab of this subscription and choose \"Manual\" mode.",
 	"subscriptions_members_clear_orphans_failed": "Failed to clear the orphans",
 	"subscriptions_members_exclude_failed": "Failed to exclude",
 	"subscriptions_members_selected_of": "Selected {selected} of {total}",
@@ -7402,5 +7401,21 @@
 			}
 		}
 	],
-	"zapret_strategy_reordered": "Moved strategy from position {from} to {to}"
+	"zapret_strategy_reordered": "Moved strategy from position {from} to {to}",
+	"routing_singbox_outbound_desc_fallback": "Uses the first available server in priority order, falling back to the next if it fails.",
+	"sb_router_wizard_composite_group_mode": "Tunnel group mode",
+	"sb_router_wizard_tunnels_count": "{count} tunnels",
+	"sb_router_wizard_mode_urltest": "Auto-select",
+	"sb_router_wizard_mode_fallback": "Fallback",
+	"sb_router_wizard_mode_selector": "Selector",
+	"sb_router_wizard_mode_urltest_desc": "Automatically routes traffic through the lowest latency tunnel (ping test).",
+	"sb_router_wizard_mode_fallback_desc": "Uses the first operational tunnel in list; fails over to the next on error.",
+	"sb_router_wizard_mode_selector_desc": "Manual active tunnel selection via the panel.",
+	"sb_router_wizard_mode_urltest_label": "auto by latency",
+	"sb_router_wizard_mode_fallback_label": "failover backup",
+	"sb_router_wizard_mode_selector_label": "manual selection",
+	"subscriptions_form_mode_fallback_title": "Fallback (Failover)",
+	"subscriptions_form_mode_fallback_desc": "Uses the first live node in list; switches to next on failure.",
+	"routing_singbox_outbound_move_up_prio": "Move up (towards #1)",
+	"routing_singbox_outbound_move_down_prio": "Move down"
 }

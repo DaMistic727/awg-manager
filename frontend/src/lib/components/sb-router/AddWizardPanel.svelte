@@ -18,7 +18,7 @@
   import { resolveOutboundDisplay } from './adapters';
   import OutboundToneIcon from './OutboundToneIcon.svelte';
   import { displayTone, toneClass } from './outboundTileTone';
-  import { Button } from '$lib/components/ui';
+  import { Button, SegmentedControl, type SegmentedOption } from '$lib/components/ui';
   import StepPill from './StepPill.svelte';
   import WizardStep from './WizardStep.svelte';
   import OutboundOption from './OutboundOption.svelte';
@@ -28,9 +28,10 @@
   import SbRouterServiceCatalogModal from './SbRouterServiceCatalogModal.svelte';
   import {
     addWizardOpen,
-    wizardOutboundCategory, wizardTunnelTags, wizardCustom,
+    wizardOutboundCategory, wizardTunnelTags, wizardCompositeMode, wizardCustom,
     wizardEditRuleIndex, wizardEditMode, wizardExistingInlineRuleSetTag, wizardWasInlineText,
-    closeAddWizard, setOutboundCategory, toggleTunnelTag, resetWizardState,
+    closeAddWizard, setOutboundCategory, toggleTunnelTag, setWizardCompositeMode, resetWizardState,
+    type WizardCompositeMode,
   } from './addWizardStore';
   import {
     templatesSelection, openTemplatesModal, clearSelection,
@@ -42,7 +43,10 @@
   import { mode } from './modeStore';
   import { ensureTunnelDnsInfra, syncTunnelDnsRule } from './emptyStateActions';
   import { findScrollContainer } from '$lib/utils/findScrollContainer';
-  import { previewTunnelOutboundResolution, formatWizardOutboundPreview } from './wizardCompositeOutbound';
+  import {
+    previewTunnelOutboundResolution,
+    formatWizardOutboundPreview,
+  } from './wizardCompositeOutbound';
 
   const outbounds = singboxRouterStore.outbounds;
   const options = singboxRouterStore.options;
@@ -92,9 +96,26 @@
   });
   const canSave = $derived(step1Ok && step2Ok);
 
+  const compositeModeOptions = $derived<SegmentedOption<WizardCompositeMode>[]>([
+    { value: 'urltest', label: m.sb_router_wizard_mode_urltest() },
+    { value: 'fallback', label: m.sb_router_wizard_mode_fallback() },
+    { value: 'selector', label: m.sb_router_wizard_mode_selector() },
+  ]);
+
+  function compositeModeDescription(compositeMode: WizardCompositeMode): string {
+    switch (compositeMode) {
+      case 'urltest':
+        return m.sb_router_wizard_mode_urltest_desc();
+      case 'fallback':
+        return m.sb_router_wizard_mode_fallback_desc();
+      case 'selector':
+        return m.sb_router_wizard_mode_selector_desc();
+    }
+  }
+
   const tunnelOutboundPreview = $derived.by(() => {
     if ($wizardOutboundCategory !== 'tunnel' || $wizardTunnelTags.length === 0) return null;
-    return previewTunnelOutboundResolution($wizardTunnelTags, $outbounds);
+    return previewTunnelOutboundResolution($wizardTunnelTags, $outbounds, $wizardCompositeMode);
   });
 
   const outboundPreviewText = $derived(
@@ -158,6 +179,7 @@
           customFields: get(wizardCustom),
           outboundCategory: get(wizardOutboundCategory)!,
           tunnelTags: get(wizardTunnelTags),
+          compositeMode: get(wizardCompositeMode),
           groups,
           presets: get(presets),
           existingRuleSetTags: get(ruleSets).map((r) => r.tag),
@@ -178,6 +200,7 @@
         customFields: get(wizardCustom),
         outboundCategory: get(wizardOutboundCategory)!,
         tunnelTags: get(wizardTunnelTags),
+        compositeMode: get(wizardCompositeMode),
         groups,
         existingRuleSetTags: get(ruleSets).map((r) => r.tag),
         existingOutbounds: get(outbounds),
@@ -357,6 +380,22 @@
     </WizardStep>
 
     <WizardStep n={3} title={m.sb_router_wizard_step_preview()} active={step1Ok && step2Ok}>
+      {#if $wizardOutboundCategory === 'tunnel' && $wizardTunnelTags.length >= 2}
+        <div class="composite-mode-card">
+          <div class="composite-mode-header">
+            <span class="composite-mode-title">{m.sb_router_wizard_composite_group_mode()}</span>
+            <span class="composite-mode-count">{m.sb_router_wizard_tunnels_count({ count: $wizardTunnelTags.length })}</span>
+          </div>
+          <SegmentedControl
+            value={$wizardCompositeMode}
+            options={compositeModeOptions}
+            ariaLabel={m.sb_router_wizard_composite_group_mode()}
+            fullWidth
+            onchange={(val) => setWizardCompositeMode(val)}
+          />
+          <p class="composite-mode-desc">{compositeModeDescription($wizardCompositeMode)}</p>
+        </div>
+      {/if}
       {#if isEditMode}
         <p class="preview-hint">{m.sb_router_wizard_preview_edit_hint()}</p>
       {:else}
@@ -552,6 +591,34 @@
     margin: 0 0 8px;
     font-size: 13px;
     color: var(--text-secondary);
+  }
+  .composite-mode-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  .composite-mode-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .composite-mode-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .composite-mode-count {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+  .composite-mode-desc {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
   }
   .preview-info,
   .preview-outbound {

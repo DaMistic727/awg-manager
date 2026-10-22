@@ -24,28 +24,44 @@ func BuildSelector(selectorTag string, memberTags []string, defaultTag string) j
 	return raw
 }
 
+// singboxDefaultIdleTimeoutSec — idle_timeout групп sing-box по умолчанию
+// (C.DefaultURLTestIdleTimeout, 30m). Интервал больше него sing-box отвергает
+// на старте («interval must be less or equal than idle_timeout»).
+const singboxDefaultIdleTimeoutSec = 1800
+
+// probedGroup — общая часть групп, которые sing-box ведёт сам по URL-тестам
+// (urltest, fallback).
+func probedGroup(typ, tag string, memberTags []string, cfg URLTestConfig) map[string]any {
+	def := DefaultURLTestConfig()
+	if cfg.URL == "" {
+		cfg.URL = def.URL
+	}
+	if cfg.IntervalSec <= 0 {
+		cfg.IntervalSec = def.IntervalSec
+	}
+	out := map[string]any{
+		"type":      typ,
+		"tag":       tag,
+		"outbounds": memberTags,
+		"url":       cfg.URL,
+		"interval":  fmt.Sprintf("%ds", cfg.IntervalSec),
+	}
+	if cfg.IntervalSec > singboxDefaultIdleTimeoutSec {
+		out["idle_timeout"] = fmt.Sprintf("%ds", cfg.IntervalSec*2)
+	}
+	return out
+}
+
 // BuildURLTest emits a sing-box urltest outbound JSON wrapping memberTags.
 // Sing-box probes each member by HEADing url every interval and routes
 // through the fastest. Tolerance is the RTT advantage (in ms) that a
 // faster member must hold before sing-box switches off the current one
 // — prevents oscillation between members with similar latency.
 func BuildURLTest(selectorTag string, memberTags []string, cfg URLTestConfig) json.RawMessage {
-	if cfg.URL == "" {
-		cfg.URL = DefaultURLTestConfig().URL
-	}
-	if cfg.IntervalSec <= 0 {
-		cfg.IntervalSec = DefaultURLTestConfig().IntervalSec
-	}
 	if cfg.ToleranceMs < 0 {
 		cfg.ToleranceMs = DefaultURLTestConfig().ToleranceMs
 	}
-	out := map[string]any{
-		"type":      "urltest",
-		"tag":       selectorTag,
-		"outbounds": memberTags,
-		"url":       cfg.URL,
-		"interval":  fmt.Sprintf("%ds", cfg.IntervalSec),
-	}
+	out := probedGroup("urltest", selectorTag, memberTags, cfg)
 	if cfg.ToleranceMs > 0 {
 		out["tolerance"] = cfg.ToleranceMs
 	}
@@ -53,25 +69,40 @@ func BuildURLTest(selectorTag string, memberTags []string, cfg URLTestConfig) js
 	return raw
 }
 
-// BuildGroupOutbound dispatches BuildSelector vs BuildURLTest based on
+// BuildFallback emits a sing-box fallback outbound JSON wrapping memberTags.
+// Sing-box uses the first healthy member in strict order, falling over when dead.
+func BuildFallback(selectorTag string, memberTags []string, cfg URLTestConfig) json.RawMessage {
+	out := probedGroup("fallback", selectorTag, memberTags, cfg)
+	out["interrupt_exist_connections"] = true
+	raw, _ := json.Marshal(out)
+	return raw
+}
+
+// BuildGroupOutbound dispatches selector/urltest/fallback based on
 // the subscription's effective mode. Centralised so service.go has a
 // single call site for both refresh- and select-time materialisation.
 func BuildGroupOutbound(sub Subscription, memberTags []string, defaultTag string) json.RawMessage {
-	if sub.EffectiveMode() == ModeURLTest {
+	switch sub.EffectiveMode() {
+	case ModeURLTest:
 		return BuildURLTest(sub.SelectorTag, memberTags, sub.EffectiveURLTest())
+	case ModeFallback:
+		return BuildFallback(sub.SelectorTag, memberTags, sub.EffectiveURLTest())
+	default:
+		return BuildSelector(sub.SelectorTag, memberTags, defaultTag)
 	}
-	return BuildSelector(sub.SelectorTag, memberTags, defaultTag)
 }
 
 // BuildAggregateGroupOutbound — аналог BuildGroupOutbound для сводных групп
-// (#372): диспатчит selector/urltest по EffectiveMode группы. defaultTag не
-// пробрасывается — у группы нет персистентного «активного» члена, selector
-// стартует с первого разрешённого.
+// (#372): диспатчит selector/urltest/fallback по EffectiveMode группы.
 func BuildAggregateGroupOutbound(g AggregateGroup, memberTags []string) json.RawMessage {
-	if g.EffectiveMode() == ModeURLTest {
+	switch g.EffectiveMode() {
+	case ModeURLTest:
 		return BuildURLTest(g.Tag, memberTags, g.EffectiveURLTest())
+	case ModeFallback:
+		return BuildFallback(g.Tag, memberTags, g.EffectiveURLTest())
+	default:
+		return BuildSelector(g.Tag, memberTags, "")
 	}
-	return BuildSelector(g.Tag, memberTags, "")
 }
 
 // BuildMixedInbound emits the SOCKS5/HTTP listener that pairs with the

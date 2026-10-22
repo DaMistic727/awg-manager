@@ -41,6 +41,7 @@ var servicedSingboxTypes = map[string]bool{
 	"dns":      true,
 	"selector": true,
 	"urltest":  true,
+	"fallback": true,
 	"tor":      true,
 	"ssh":      true,
 	"socks":    true,

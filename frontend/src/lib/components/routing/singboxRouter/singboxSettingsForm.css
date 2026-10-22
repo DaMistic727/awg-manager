@@ -308,6 +308,52 @@
 	max-width: 100%;
 }
 
+.sbr-settings-form .member-chip-order {
+	font-weight: 600;
+	font-size: 0.65rem;
+	padding: 0.05rem 0.3rem;
+	border-radius: 999px;
+	/* currentColor — работает в обеих темах без отдельного правила. */
+	background: color-mix(in srgb, currentColor 12%, transparent);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.sbr-settings-form .member-chip-order.primary {
+	background: var(--color-accent);
+	color: var(--color-accent-contrast, #ffffff);
+}
+
+.sbr-settings-form .member-chip-nav-col {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0;
+	line-height: 1;
+}
+
+.sbr-settings-form .member-chip-nav {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1rem;
+	height: 0.65rem;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: 2px;
+	color: inherit;
+	opacity: 0.7;
+	cursor: pointer;
+	transition: opacity 120ms ease, background 120ms ease;
+}
+
+.sbr-settings-form .member-chip-nav:hover {
+	opacity: 1;
+	background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
 .sbr-settings-form .member-chip-label {
 	overflow: hidden;
 	text-overflow: ellipsis;

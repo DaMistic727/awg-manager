@@ -28,8 +28,23 @@ describe('findMatchingComposite', () => {
     expect(findMatchingComposite(outbounds, ['awg10', 'warp'])?.tag).toBe('custom-composite-1');
   });
 
+  it('находит composite с тем же набором и типом', () => {
+    expect(findMatchingComposite(outbounds, ['awg10', 'warp'], 'selector')?.tag).toBe('custom-composite-1');
+    expect(findMatchingComposite(outbounds, ['awg10', 'warp'], 'urltest')).toBeUndefined();
+  });
+
   it('не находит при другом составе', () => {
     expect(findMatchingComposite(outbounds, ['warp'])).toBeUndefined();
+  });
+
+  it('для fallback учитывает строгий порядок участников', () => {
+    const fallbackOutbounds: SingboxRouterOutbound[] = [
+      { type: 'fallback', tag: 'fb-group', outbounds: ['warp', 'awg10'] },
+    ];
+    // Exact order matches
+    expect(findMatchingComposite(fallbackOutbounds, ['warp', 'awg10'], 'fallback')?.tag).toBe('fb-group');
+    // Inverted order does NOT match because priority differs
+    expect(findMatchingComposite(fallbackOutbounds, ['awg10', 'warp'], 'fallback')).toBeUndefined();
   });
 });
 
@@ -51,22 +66,25 @@ describe('previewTunnelOutboundResolution', () => {
       outboundTag: 'warp',
       willCreate: false,
       tunnelCount: 1,
+      mode: 'urltest',
     });
   });
 
   it('существующий composite — без создания', () => {
-    expect(previewTunnelOutboundResolution(['warp', 'awg10'], outbounds)).toEqual({
+    expect(previewTunnelOutboundResolution(['warp', 'awg10'], outbounds, 'selector')).toEqual({
       outboundTag: 'custom-composite-1',
       willCreate: false,
       tunnelCount: 2,
+      mode: 'selector',
     });
   });
 
   it('новый набор — предложит создать custom-composite-2', () => {
-    expect(previewTunnelOutboundResolution(['warp', 'awg20'], outbounds)).toEqual({
+    expect(previewTunnelOutboundResolution(['warp', 'awg20'], outbounds, 'fallback')).toEqual({
       outboundTag: 'custom-composite-2',
       willCreate: true,
       tunnelCount: 2,
+      mode: 'fallback',
     });
   });
 });
@@ -74,22 +92,24 @@ describe('previewTunnelOutboundResolution', () => {
 describe('formatTunnelOutboundPreview', () => {
   it('описывает один туннель, reuse и создание composite', () => {
     expect(
-      formatTunnelOutboundPreview({ outboundTag: 'warp', willCreate: false, tunnelCount: 1 }),
+      formatTunnelOutboundPreview({ outboundTag: 'warp', willCreate: false, tunnelCount: 1, mode: 'urltest' }),
     ).toContain('«warp»');
     expect(
       formatTunnelOutboundPreview({
         outboundTag: 'custom-composite-1',
         willCreate: false,
         tunnelCount: 2,
+        mode: 'fallback',
       }),
-    ).toContain('использован composite');
+    ).toContain('резерв с переключением');
     expect(
       formatTunnelOutboundPreview({
         outboundTag: 'custom-composite-2',
         willCreate: true,
         tunnelCount: 2,
+        mode: 'selector',
       }),
-    ).toContain('создан composite');
+    ).toContain('ручной выбор');
   });
 });
 
@@ -102,13 +122,33 @@ describe('formatWizardOutboundPreview', () => {
 
 describe('buildWizardCompositeOutbound', () => {
   it('создаёт urltest с дефолтными параметрами проб', () => {
-    expect(buildWizardCompositeOutbound('custom-composite-1', ['warp', 'awg10'])).toEqual({
+    expect(buildWizardCompositeOutbound('custom-composite-1', ['warp', 'awg10'], 'urltest')).toEqual({
       type: 'urltest',
       tag: 'custom-composite-1',
       outbounds: ['warp', 'awg10'],
       url: 'https://www.gstatic.com/generate_204',
       interval: '60s',
       tolerance: 50,
+    });
+  });
+
+  it('создаёт fallback с interrupt_exist_connections', () => {
+    expect(buildWizardCompositeOutbound('custom-composite-1', ['warp', 'awg10'], 'fallback')).toEqual({
+      type: 'fallback',
+      tag: 'custom-composite-1',
+      outbounds: ['warp', 'awg10'],
+      url: 'https://www.gstatic.com/generate_204',
+      interval: '60s',
+      interrupt_exist_connections: true,
+    });
+  });
+
+  it('создаёт selector с дефолтным первым участником', () => {
+    expect(buildWizardCompositeOutbound('custom-composite-1', ['warp', 'awg10'], 'selector')).toEqual({
+      type: 'selector',
+      tag: 'custom-composite-1',
+      outbounds: ['warp', 'awg10'],
+      default: 'warp',
     });
   });
 });

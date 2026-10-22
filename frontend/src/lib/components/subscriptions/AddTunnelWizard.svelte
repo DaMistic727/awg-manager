@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { isAutoSelectMode } from '$lib/utils/subscriptionMode';
 	import { m, uiText, type UiText } from '$lib/i18n';
 	import { goto } from '$app/navigation';
 	import { Modal, Button, Dropdown } from '$lib/components/ui';
@@ -432,7 +433,7 @@
 				enabled,
 				mode,
 				urlTest:
-					mode === 'urltest'
+					isAutoSelectMode(mode)
 						? { url: utUrl, intervalSec: utIntervalSec, toleranceMs: utToleranceMs }
 						: undefined,
 				excludedKeys: isInline ? undefined : [...excludedKeys],
@@ -722,10 +723,28 @@
 							</span>
 						{/if}
 					</button>
+					<button
+						type="button"
+						role="radio"
+						aria-checked={mode === 'fallback'}
+						class="mode-card"
+						class:selected={mode === 'fallback'}
+						onclick={() => (mode = 'fallback')}
+					>
+						<div class="mode-title">{m.subscriptions_form_mode_fallback_title()}</div>
+						<div class="mode-desc">
+							{m.subscriptions_form_mode_fallback_desc()}
+						</div>
+						{#if mode === 'fallback'}
+							<span class="mode-check" aria-hidden="true">
+								<Check size={12} strokeWidth={3} aria-hidden="true" />
+							</span>
+						{/if}
+					</button>
 				</div>
 			</div>
 
-			{#if mode === 'urltest'}
+			{#if isAutoSelectMode(mode)}
 				<div class="urltest-block">
 					<label class="row">
 						<span class="lbl">{m.subscriptions_form_check_url()}</span>
@@ -741,10 +760,12 @@
 							<span class="lbl">{m.subscriptions_form_interval()}</span>
 							<input class="inp" type="number" min="10" max="3600" bind:value={utIntervalSec} />
 						</label>
-						<label class="col">
-							<span class="lbl">{m.subscriptions_form_tolerance()}</span>
-							<input class="inp" type="number" min="0" max="2000" bind:value={utToleranceMs} />
-						</label>
+						{#if mode === 'urltest'}
+							<label class="col">
+								<span class="lbl">{m.subscriptions_form_tolerance()}</span>
+								<input class="inp" type="number" min="0" max="2000" bind:value={utToleranceMs} />
+							</label>
+						{/if}
 					</div>
 				</div>
 			{/if}

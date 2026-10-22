@@ -149,6 +149,23 @@ describe('addWizardStore', () => {
     expect(get(m.wizardCustom).rulesList).toBe('foo.com');
     expect(get(m.wizardOutboundCategory)).toBe('tunnel');
     expect(get(m.wizardTunnelTags)).toEqual(['warp', 'awg10']);
+    expect(get(m.wizardCompositeMode)).toBe('urltest');
+  });
+
+  it('openEditWizard with custom compositeMode', async () => {
+    const m = await import('./addWizardStore');
+    m.openEditWizard(6, {
+      editMode: 'inline',
+      rulesList: 'bar.com',
+      outboundCategory: 'tunnel',
+      tunnelTags: ['warp', 'awg10'],
+      compositeMode: 'fallback',
+      existingInlineRuleSetTag: 'custom-2',
+      wasInlineText: false,
+    });
+    expect(get(m.wizardCompositeMode)).toBe('fallback');
+    m.setWizardCompositeMode('selector');
+    expect(get(m.wizardCompositeMode)).toBe('selector');
   });
 
   it('openEditWizard external mode', async () => {
