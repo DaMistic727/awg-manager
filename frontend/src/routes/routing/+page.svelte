@@ -475,6 +475,10 @@
         active={activeTab}
         onchange={(id) => requestTab(id)}
         urlParam="tab"
+        persistKey="routing-sections"
+        skipMemorySearchParams={['policy', 'rule', 'edit']}
+        memoryReady={$settings !== null && $systemInfo.lastFetchedAt > 0 && $hydrarouteStatusStore.lastFetchedAt > 0 && (!singboxInstalled || $singboxSettings !== null)}
+        restoreMemory={savedFavoriteTab === null}
         defaultTab={favoriteTab ?? 'dns'}
     />
 
