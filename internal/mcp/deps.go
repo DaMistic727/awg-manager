@@ -102,7 +102,10 @@ type Deps interface {
 	ControlSingbox(ctx context.Context, action string) (SingboxStatus, error)
 	ListSingboxTunnels(ctx context.Context) ([]SingboxTunnel, error)
 	// ListSingboxRules returns the router's rules in evaluation order.
-	// hasDraft reports whether they come from an unapplied draft.
+	// hasDraft reports whether they come from an unapplied draft. Like
+	// every router read here (groups, DNS, rule sets), it reads the
+	// configuration the router routes by: in fakeip-tun mode that mode's
+	// own, which has no draft.
 	ListSingboxRules(ctx context.Context) (rules []SingboxRule, hasDraft bool, err error)
 	// ListSingboxOutbounds returns every group. An engine that does not
 	// answer is not an error: the entries come back with RuntimeKnown
@@ -116,12 +119,25 @@ type Deps interface {
 	GetSingboxOutbound(ctx context.Context, tag string) (SingboxOutboundDetail, error)
 	SingboxStaging(ctx context.Context) (SingboxStaging, error)
 	// SetSingboxRuleOutbound retargets one rule. The write lands in the
-	// draft; nothing changes for traffic until ApplySingboxStaging.
-	SetSingboxRuleOutbound(ctx context.Context, index int, outbound string) error
+	// draft; nothing changes for traffic until ApplySingboxStaging. Refused
+	// in fakeip-tun mode, as the writes below are. expectMatch, when not
+	// empty, is the rule's match from ListSingboxRules: the write is refused
+	// unless the rule at index still renders so, checked in the same write.
+	SetSingboxRuleOutbound(ctx context.Context, index int, expectMatch, outbound string) error
 	// ListSingboxDNSServers returns the router's DNS servers in
 	// configuration order. hasDraft is ListSingboxRules's: the list comes
 	// from the draft when one exists.
 	ListSingboxDNSServers(ctx context.Context) (servers []SingboxDNSServer, hasDraft bool, err error)
+	// SingboxRouterStatus describes how the router is set up and whether
+	// it works. It asks NDMS and probes the kernel, as the web page does,
+	// so it is slower than the lists.
+	SingboxRouterStatus(ctx context.Context) (SingboxRouterStatus, error)
+	// ListSingboxDNSRules returns the router's DNS rules in evaluation
+	// order with the DNS final and strategy, hasDraft as
+	// ListSingboxDNSServers.
+	ListSingboxDNSRules(ctx context.Context) (SingboxDNSRules, error)
+	// ListSingboxDNSRewrites returns the DNS Rewrite entries in order.
+	ListSingboxDNSRewrites(ctx context.Context) ([]SingboxDNSRewrite, error)
 	// ListSingboxRuleSets returns every rule set in configuration order,
 	// hasDraft as ListSingboxDNSServers. The tool pages the result;
 	// implementations must not truncate it.
@@ -147,6 +163,35 @@ type Deps interface {
 	// tags, all or none; "" downloads them directly again. Only remote sets
 	// are downloaded, so any other kind is an error.
 	SetSingboxRuleSetDetour(ctx context.Context, tags []string, detour string) error
+
+	// The rule and rule set writes below land in the draft and are refused
+	// in fakeip-tun mode, as the writes above are. System rules (sniff,
+	// hijack-dns, the private-address bypass) and rules awg-manager manages
+	// are neither edited nor moved, and nothing is put above a system rule.
+
+	// Positions come from ListSingboxRules and shift with every insert,
+	// move and delete. expectMatch is checked as SetSingboxRuleOutbound
+	// checks it, against the rule the edit touches: the one at index, at
+	// from, or the one now at position that the new rule pushes down.
+
+	// AddSingboxRule inserts a rule at position; -1 appends it, and then
+	// there is nothing to check expectMatch against.
+	AddSingboxRule(ctx context.Context, position int, expectMatch string, in SingboxRuleInput) error
+	// UpdateSingboxRule replaces rule index whole.
+	UpdateSingboxRule(ctx context.Context, index int, expectMatch string, in SingboxRuleInput) error
+	// DeleteSingboxRule removes rule index and returns it as it was.
+	DeleteSingboxRule(ctx context.Context, index int, expectMatch string) (SingboxRule, error)
+	// MoveSingboxRule moves rule from to position to.
+	MoveSingboxRule(ctx context.Context, from, to int, expectMatch string) error
+	// SetSingboxRouteFinal sets the outbound for traffic no rule matched.
+	SetSingboxRouteFinal(ctx context.Context, outbound string) error
+	// AddSingboxRuleSet adds a rule set; a tag already taken is an error.
+	AddSingboxRuleSet(ctx context.Context, in SingboxRuleSetInput) error
+	// DeleteSingboxRuleSet removes a rule set and returns it as it was. A
+	// set rules still use is refused unless force; with force the
+	// references go, and a rule left without any matcher goes with them —
+	// affected are those rules as they were.
+	DeleteSingboxRuleSet(ctx context.Context, tag string, force bool) (SingboxRuleSetDeletion, error)
 
 	ApplySingboxStaging(ctx context.Context) error
 	DiscardSingboxStaging(ctx context.Context) error

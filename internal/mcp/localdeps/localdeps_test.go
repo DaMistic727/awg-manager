@@ -2307,6 +2307,9 @@ type fakeRouter struct {
 	bulkIdx   []int
 	bulkTag   string
 	bulkErr   error
+	// checked counts the RuleChecks the user-rule edits ran; a failed one
+	// stops the edit before it is recorded, as in the service.
+	checked   int
 	applied   int
 	discarded int
 	applyErr  error
@@ -2316,7 +2319,10 @@ type fakeRouter struct {
 	listErr error
 
 	settings storage.SingboxRouterSettings
+	status   router.Status
 	dns      []router.DNSServer
+	dnsRules []router.DNSRule
+	dnsFinal string
 	ruleSets []router.RuleSet
 	// The edits record what they received; editErr fails every one of
 	// them, and edits counts the calls that reached the router.
@@ -2329,6 +2335,13 @@ type fakeRouter struct {
 	ruleSetVia  string
 	editErr     error
 	edits       int
+	ruleAt      int
+	ruleTo      int
+	rule        router.Rule
+	final       string
+	addedSet    router.RuleSet
+	deletedSet  string
+	deleteForce bool
 }
 
 func (f *fakeRouter) ListRules(context.Context) ([]router.Rule, error) { return f.rules, nil }
@@ -2339,9 +2352,22 @@ func (f *fakeRouter) ListCompositeOutbounds(context.Context) ([]router.Composite
 	return f.outbounds, nil
 }
 func (f *fakeRouter) StagingStatus(context.Context) router.StagingStatus { return f.staging }
-func (f *fakeRouter) BulkSetRuleOutbound(_ context.Context, idx []int, tag string) error {
-	f.bulkIdx, f.bulkTag = idx, tag
+func (f *fakeRouter) SetUserRuleOutbound(_ context.Context, index int, tag string, check router.RuleCheck) error {
+	if err := f.check(index, check); err != nil {
+		return err
+	}
+	f.bulkIdx, f.bulkTag = []int{index}, tag
 	return f.bulkErr
+}
+
+// check runs a RuleCheck against the rule at i, as the service does inside
+// the write.
+func (f *fakeRouter) check(i int, check router.RuleCheck) error {
+	if check == nil || i < 0 || i >= len(f.rules) {
+		return nil
+	}
+	f.checked++
+	return check(f.rules[i])
 }
 func (f *fakeRouter) ApplyStaging(context.Context) (singboxorch.ValidationResult, error) {
 	f.applied++
@@ -2350,6 +2376,13 @@ func (f *fakeRouter) ApplyStaging(context.Context) (singboxorch.ValidationResult
 func (f *fakeRouter) DiscardStaging(context.Context) error { f.discarded++; return nil }
 func (f *fakeRouter) GetSettings(context.Context) (storage.SingboxRouterSettings, error) {
 	return f.settings, nil
+}
+func (f *fakeRouter) GetStatus(context.Context) (router.Status, error) { return f.status, nil }
+func (f *fakeRouter) ListDNSRules(context.Context) ([]router.DNSRule, error) {
+	return f.dnsRules, nil
+}
+func (f *fakeRouter) GetDNSGlobals(context.Context) (string, string, string, error) {
+	return f.dnsFinal, "prefer_ipv4", "", nil
 }
 func (f *fakeRouter) ListDNSServers(context.Context) ([]router.DNSServer, error) { return f.dns, nil }
 func (f *fakeRouter) ListRuleSets(context.Context) ([]router.RuleSet, error)     { return f.ruleSets, nil }
@@ -2366,6 +2399,56 @@ func (f *fakeRouter) SetCompositeOutboundMembers(_ context.Context, tag string, 
 func (f *fakeRouter) SetDNSServerDetour(_ context.Context, tag, detour string) error {
 	f.edits++
 	f.dnsTag, f.dnsDetour = tag, detour
+	return f.editErr
+}
+func (f *fakeRouter) InsertRule(_ context.Context, index int, r router.Rule, check router.RuleCheck) error {
+	if err := f.check(index, check); err != nil {
+		return err
+	}
+	f.edits++
+	f.ruleAt, f.rule = index, r
+	return f.editErr
+}
+func (f *fakeRouter) ReplaceUserRule(_ context.Context, index int, r router.Rule, check router.RuleCheck) error {
+	if err := f.check(index, check); err != nil {
+		return err
+	}
+	f.edits++
+	f.ruleAt, f.rule = index, r
+	return f.editErr
+}
+func (f *fakeRouter) DeleteUserRule(_ context.Context, index int, check router.RuleCheck) (router.Rule, error) {
+	if err := f.check(index, check); err != nil {
+		return router.Rule{}, err
+	}
+	f.edits++
+	f.ruleAt = index
+	if f.editErr != nil {
+		return router.Rule{}, f.editErr
+	}
+	return f.rules[index], nil
+}
+func (f *fakeRouter) MoveUserRule(_ context.Context, from, to int, check router.RuleCheck) error {
+	if err := f.check(from, check); err != nil {
+		return err
+	}
+	f.edits++
+	f.ruleAt, f.ruleTo = from, to
+	return f.editErr
+}
+func (f *fakeRouter) SetRouteFinal(_ context.Context, tag string) error {
+	f.edits++
+	f.final = tag
+	return f.editErr
+}
+func (f *fakeRouter) AddRuleSet(_ context.Context, rs router.RuleSet) error {
+	f.edits++
+	f.addedSet = rs
+	return f.editErr
+}
+func (f *fakeRouter) DeleteRuleSet(_ context.Context, tag string, force bool) error {
+	f.edits++
+	f.deletedSet, f.deleteForce = tag, force
 	return f.editErr
 }
 func (f *fakeRouter) BulkSetRuleSetDetour(_ context.Context, tags []string, detour string) error {
@@ -2418,6 +2501,12 @@ func TestLocal_ListSingboxRulesRendersAMatchSummary(t *testing.T) {
 	if got[1].Action != "route" {
 		t.Fatalf("action = %q, want route for an omitted action", got[1].Action)
 	}
+	if got[0].System || got[1].System {
+		t.Fatal("user rules are not system rules")
+	}
+	if r := singboxRule(0, router.Rule{Action: "sniff"}); !r.System {
+		t.Fatal("the sniff rule kept on top must be marked system: protected edits point the agent at that flag")
+	}
 	if !got[2].Managed {
 		t.Error("a rule carrying awgm_managed must be marked")
 	}
@@ -2466,30 +2555,25 @@ func TestLocal_SingboxStaging(t *testing.T) {
 	}
 }
 
-// TestLocal_SetSingboxRuleOutboundRefusesManagedRules — правило,
-// созданное демоном, будет переписано ближайшим reconcile: правка
-// «применится» и молча исчезнет.
-func TestLocal_SetSingboxRuleOutboundRefusesManagedRules(t *testing.T) {
+// TestLocal_SetSingboxRuleOutbound — правку делает одна запись сервиса
+// (SetUserRuleOutbound): managed-правило и индекс за списком он отвергает
+// сам, на конфиге этой же записи (router/service_user_rules_test.go), а
+// отказ доходит до агента с подсказкой.
+func TestLocal_SetSingboxRuleOutbound(t *testing.T) {
 	ctx := context.Background()
 	fr := routerHarness()
 	l := New(Config{Router: fr})
 
-	if err := l.SetSingboxRuleOutbound(ctx, 2, "auto"); err == nil {
-		t.Fatal("editing a managed rule must be refused")
-	}
-	if fr.bulkTag != "" {
-		t.Fatalf("the refused edit still reached the service: %v %q", fr.bulkIdx, fr.bulkTag)
-	}
-
-	if err := l.SetSingboxRuleOutbound(ctx, 5, "auto"); err == nil {
-		t.Error("an out-of-range index must be refused")
-	}
-
-	if err := l.SetSingboxRuleOutbound(ctx, 0, "auto"); err != nil {
+	if err := l.SetSingboxRuleOutbound(ctx, 0, "", "auto"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.bulkIdx) != 1 || fr.bulkIdx[0] != 0 || fr.bulkTag != "auto" {
-		t.Fatalf("service got %v %q", fr.bulkIdx, fr.bulkTag)
+	if len(fr.bulkIdx) != 1 || fr.bulkIdx[0] != 0 || fr.bulkTag != "auto" || fr.checked != 0 {
+		t.Fatalf("service got %v %q, %d checks", fr.bulkIdx, fr.bulkTag, fr.checked)
+	}
+
+	fr.bulkErr = fmt.Errorf("%w: правило 2 создано awg-manager и будет переписано", router.ErrRuleProtected)
+	if err := l.SetSingboxRuleOutbound(ctx, 2, "", "auto"); !errors.Is(err, router.ErrRuleProtected) || !strings.Contains(err.Error(), "managed") {
+		t.Fatalf("a managed rule must be refused with the way out: %v", err)
 	}
 }
 
@@ -2552,7 +2636,7 @@ func TestLocal_RouterToolsWithoutTheServiceSaySo(t *testing.T) {
 	if _, err := l.SingboxStaging(ctx); err == nil {
 		t.Error("staging status must report the missing service")
 	}
-	if err := l.SetSingboxRuleOutbound(ctx, 0, "auto"); err == nil {
+	if err := l.SetSingboxRuleOutbound(ctx, 0, "", "auto"); err == nil {
 		t.Error("the edit must report the missing service")
 	}
 	if err := l.ApplySingboxStaging(ctx); err == nil {
