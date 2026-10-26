@@ -273,6 +273,7 @@ type Local struct {
 	dnsLog     *logging.ScopedLogger
 	staticLog  *logging.ScopedLogger
 	clientLog  *logging.ScopedLogger
+	policyLog  *logging.ScopedLogger
 	serverLog  *logging.ScopedLogger
 	singboxLog *logging.ScopedLogger
 	subLog     *logging.ScopedLogger
@@ -289,6 +290,7 @@ func New(cfg Config) *Local {
 		dnsLog:           logging.NewScopedLogger(cfg.AppLog, logging.GroupRouting, logging.SubDnsRoute),
 		staticLog:        logging.NewScopedLogger(cfg.AppLog, logging.GroupRouting, logging.SubStaticRoute),
 		clientLog:        logging.NewScopedLogger(cfg.AppLog, logging.GroupRouting, logging.SubClientRoute),
+		policyLog:        logging.NewScopedLogger(cfg.AppLog, logging.GroupRouting, logging.SubAccessPolicy),
 		serverLog:        logging.NewScopedLogger(cfg.AppLog, logging.GroupServer, logging.SubManaged),
 		singboxLog:       logging.NewScopedLogger(cfg.AppLog, logging.GroupSingbox, logging.SubSBRouter),
 		// Same scope as api.SubscriptionHandler: user actions on
@@ -1636,18 +1638,7 @@ func (l *Local) ListAccessPolicies(ctx context.Context) ([]mcpsrv.AccessPolicy, 
 	}
 	out := make([]mcpsrv.AccessPolicy, 0, len(list))
 	for _, p := range list {
-		// Denied interfaces are "in the list but not used" — the tool
-		// documents Interfaces as the interfaces the policy PERMITS, and an
-		// agent that saw a denied interface here could route traffic over a
-		// path the policy actually blocks.
-		names := make([]string, 0, len(p.Interfaces))
-		for _, iface := range p.Interfaces {
-			if iface.Denied || iface.Name == "" {
-				continue
-			}
-			names = append(names, iface.Name)
-		}
-		out = append(out, mcpsrv.AccessPolicy{Name: p.Name, Description: p.Description, Interfaces: names, DeviceCount: p.DeviceCount, IsStandard: p.IsStandard})
+		out = append(out, accessPolicy(p))
 	}
 	return out, nil
 }

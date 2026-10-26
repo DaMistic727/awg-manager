@@ -689,6 +689,28 @@ type AccessPolicy struct {
 	Interfaces  []string `json:"interfaces"`
 	DeviceCount int      `json:"deviceCount"`
 	IsStandard  bool     `json:"isStandard"`
+	// Standalone and Order describe the policy in full, as the access
+	// policy tools edit it.
+	Standalone bool                    `json:"standalone" jsonschema:"the policy works on its own, not bound to the router's global rules: static routes from the router settings are not copied into it (routes from the \"IP addresses\" tab do not work for its devices). It does NOT block the router's default connection — that is decided by the interfaces the policy permits"`
+	Order      []AccessPolicyInterface `json:"order,omitempty" jsonschema:"every interface in the policy in priority order, denied ones included"`
+	// Unconfirmed is set by an edit that was applied but could not be read
+	// back: the fields above are then from before the edit.
+	Unconfirmed string `json:"unconfirmed,omitempty" jsonschema:"set when the change IS applied but the policy could not be read back; the fields above are from before the change — read list_access_policies to see it"`
+}
+
+// AccessPolicyInterface is one interface in a policy's list.
+type AccessPolicyInterface struct {
+	Name   string `json:"name"`
+	Label  string `json:"label,omitempty"`
+	Order  int    `json:"order" jsonschema:"position: traffic uses the first permitted interface that is up"`
+	Denied bool   `json:"denied,omitempty" jsonschema:"the router holds this entry switched off: it stays in the list and is not used. set_access_policy_interface with permit false removes an entry instead"`
+}
+
+// PolicyInterface is a router interface a policy can permit.
+type PolicyInterface struct {
+	Name  string `json:"name" jsonschema:"the name the access policy tools take"`
+	Label string `json:"label,omitempty"`
+	Up    bool   `json:"up"`
 }
 
 type Device struct {

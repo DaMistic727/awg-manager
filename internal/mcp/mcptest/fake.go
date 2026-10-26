@@ -806,6 +806,128 @@ func (f *Fake) ListDevices(context.Context) ([]mcpsrv.Device, error) {
 	return append([]mcpsrv.Device(nil), f.Devices...), nil
 }
 
+// policyInterfaces is what a policy may permit in the fake.
+var policyInterfaces = []mcpsrv.PolicyInterface{{Name: "Wireguard0", Up: true}, {Name: "ISP", Label: "Provider", Up: true}, {Name: "OpkgTun1", Up: false}}
+
+func (f *Fake) ListPolicyInterfaces(context.Context) ([]mcpsrv.PolicyInterface, error) {
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	return append([]mcpsrv.PolicyInterface(nil), policyInterfaces...), nil
+}
+
+func (f *Fake) policyIndex(name string) (int, error) {
+	i := slices.IndexFunc(f.Policies, func(p mcpsrv.AccessPolicy) bool { return p.Name == name })
+	if i < 0 {
+		return -1, fmt.Errorf("access policy %q not found (use list_access_policies)", name)
+	}
+	return i, nil
+}
+
+func (f *Fake) CreateAccessPolicy(_ context.Context, description string) (mcpsrv.AccessPolicy, error) {
+	if f.Err != nil {
+		return mcpsrv.AccessPolicy{}, f.Err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := mcpsrv.AccessPolicy{Name: fmt.Sprintf("Policy%d", len(f.Policies)), Description: description, Interfaces: []string{}, IsStandard: true}
+	f.Policies = append(f.Policies, p)
+	return p, nil
+}
+
+func (f *Fake) DeleteAccessPolicy(_ context.Context, name string) (mcpsrv.AccessPolicy, error) {
+	if f.Err != nil {
+		return mcpsrv.AccessPolicy{}, f.Err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.policyIndex(name)
+	if err != nil {
+		return mcpsrv.AccessPolicy{}, err
+	}
+	if f.RouterStatus.PolicyName == name {
+		return mcpsrv.AccessPolicy{}, fmt.Errorf("access policy %q is the one the sing-box router routes by", name)
+	}
+	p := f.Policies[i]
+	f.Policies = slices.Delete(f.Policies, i, i+1)
+	return p, nil
+}
+
+func (f *Fake) UpdateAccessPolicy(_ context.Context, name string, description *string, standalone *bool) (mcpsrv.AccessPolicy, error) {
+	if f.Err != nil {
+		return mcpsrv.AccessPolicy{}, f.Err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.policyIndex(name)
+	if err != nil {
+		return mcpsrv.AccessPolicy{}, err
+	}
+	if description != nil {
+		f.Policies[i].Description = *description
+	}
+	if standalone != nil {
+		f.Policies[i].Standalone = *standalone
+	}
+	return f.Policies[i], nil
+}
+
+// SetAccessPolicyInterface keeps the fake's policies without denied
+// entries: Interfaces is the whole order, and Order mirrors it.
+func (f *Fake) SetAccessPolicyInterface(_ context.Context, name, iface string, permit bool, order int, expectOrder []string) (mcpsrv.AccessPolicy, error) {
+	if f.Err != nil {
+		return mcpsrv.AccessPolicy{}, f.Err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	i, err := f.policyIndex(name)
+	if err != nil {
+		return mcpsrv.AccessPolicy{}, err
+	}
+	p := &f.Policies[i]
+	if expectOrder != nil && !slices.Equal(p.Interfaces, expectOrder) {
+		return mcpsrv.AccessPolicy{}, fmt.Errorf("the interfaces of %q are now %v, not %v — the list changed since it was read; nothing was changed: read list_access_policies again", name, p.Interfaces, expectOrder)
+	}
+	if permit && !slices.ContainsFunc(policyInterfaces, func(g mcpsrv.PolicyInterface) bool { return g.Name == iface }) {
+		return mcpsrv.AccessPolicy{}, fmt.Errorf("%q is not an interface a policy can use (use list_policy_interfaces)", iface)
+	}
+	if !permit && !slices.Contains(p.Interfaces, iface) {
+		return mcpsrv.AccessPolicy{}, fmt.Errorf("%q is not in access policy %q, so there is nothing to remove", iface, name)
+	}
+	p.Interfaces = slices.DeleteFunc(slices.Clone(p.Interfaces), func(n string) bool { return n == iface })
+	if permit {
+		if order < 0 {
+			order = len(p.Interfaces)
+		}
+		p.Interfaces = slices.Insert(p.Interfaces, min(order, len(p.Interfaces)), iface)
+	}
+	p.Order = nil
+	for j, n := range p.Interfaces {
+		p.Order = append(p.Order, mcpsrv.AccessPolicyInterface{Name: n, Order: j})
+	}
+	return *p, nil
+}
+
+func (f *Fake) AssignDevicePolicy(_ context.Context, mac, policy string) (mcpsrv.Device, error) {
+	if f.Err != nil {
+		return mcpsrv.Device{}, f.Err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if policy != "" {
+		if _, err := f.policyIndex(policy); err != nil {
+			return mcpsrv.Device{}, err
+		}
+	}
+	for i := range f.Devices {
+		if strings.EqualFold(f.Devices[i].MAC, mac) {
+			f.Devices[i].Policy = policy
+			return f.Devices[i], nil
+		}
+	}
+	return mcpsrv.Device{}, fmt.Errorf("device %s not found (use list_devices)", mac)
+}
+
 // logLevelRank orders levels for LogsQuery.Level minimum-level filtering.
 // Shared with localdeps so both implementations agree exactly.
 var logLevelRank = mcpsrv.LogLevelRank
