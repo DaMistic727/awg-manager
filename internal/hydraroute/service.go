@@ -2,6 +2,7 @@ package hydraroute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -373,7 +374,46 @@ func (s *Service) ReadConfig() (*Config, error) {
 func (s *Service) WriteConfig(cfg *Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.writeConfigLocked(cfg)
+}
 
+// ErrNoConfig is UpdateConfig refused: hrneo.conf does not exist — HR Neo
+// is not installed, or has not written its configuration yet.
+var ErrNoConfig = errors.New("hrneo.conf does not exist")
+
+// UpdateConfig reads hrneo.conf, lets edit change it and writes it as
+// WriteConfig does, all under s.mu — the lock SetPolicyOrder and
+// SyncGeoFilesToConfig write their parts under. A caller that changes a few
+// settings must not write back a whole copy read before such a write: the
+// policy order dragged in the web interface meanwhile would be lost. An
+// edit's error writes nothing. Returns the config written.
+func (s *Service) UpdateConfig(edit func(*Config) error) (*Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// ReadConfig gives the defaults for a missing file, and the write would
+	// create it: on a router without HR Neo that is a hrneo.conf nobody
+	// reads, and "settings saved" for nothing.
+	if _, err := os.Stat(hrConfPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNoConfig
+		}
+		return nil, err
+	}
+	cfg, err := ReadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if err := edit(cfg); err != nil {
+		return nil, err
+	}
+	if err := s.writeConfigLocked(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// writeConfigLocked is WriteConfig under s.mu.
+func (s *Service) writeConfigLocked(cfg *Config) error {
 	if s.geodata != nil {
 		geoIP, geoSite := s.geodata.GeoFilePaths()
 		cfg.GeoIPFiles = geoIP
