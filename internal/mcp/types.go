@@ -990,6 +990,81 @@ type ManagedServer struct {
 	Managed bool `json:"managed" jsonschema:"true means the peer tools accept this server's id"`
 }
 
+// WireguardServer is a WireGuard server awg-manager runs on the router, in
+// full: what the server tools change.
+type WireguardServer struct {
+	ID          string   `json:"id" jsonschema:"the server's NDMS interface (Wireguard3); the id every server and peer tool takes"`
+	Description string   `json:"description"`
+	Address     string   `json:"address" jsonschema:"the server's address inside the tunnel"`
+	Mask        string   `json:"mask"`
+	ListenPort  int      `json:"listenPort"`
+	Endpoint    string   `json:"endpoint,omitempty" jsonschema:"address clients connect to; empty means the router's WAN address"`
+	DNS         string   `json:"dns,omitempty" jsonschema:"DNS servers written into client configs"`
+	MTU         int      `json:"mtu,omitempty"`
+	NATMode     string   `json:"natMode" jsonschema:"source address translation: full (everywhere — in the LAN clients appear as the router), internet-only (toward the internet only) or none (no internet access)"`
+	LANSegments []string `json:"lanSegments,omitempty" jsonschema:"LAN segments awg-manager lets clients into; firewall rules set on the interface in the router's web interface apply as well"`
+	Policy      string   `json:"policy,omitempty" jsonschema:"access policy client traffic follows"`
+	PeerCount   int      `json:"peerCount"`
+}
+
+// WireguardServerDetail is one server with its AmneziaWG obfuscation as
+// the router holds it — what set_wireguard_server_obfuscation lays its
+// parameters over.
+type WireguardServerDetail struct {
+	WireguardServer
+	// Obfuscation maps a parameter (jc, jmin, jmax, s1–s4, h1–h4) to its
+	// value as NDMS returns it; absent ones are not set.
+	Obfuscation map[string]string `json:"obfuscation" jsonschema:"AmneziaWG parameters the server uses now (jc, jmin, jmax, s1–s4, h1–h4); empty means plain WireGuard. Clients connect only with the same values"`
+}
+
+// WireguardServerInput is a new server; zero fields take the service's
+// defaults (a free subnet, the default MTU).
+type WireguardServerInput struct {
+	Description string
+	Address     string
+	Mask        string
+	ListenPort  int
+	Endpoint    string
+	DNS         string
+	MTU         int
+	AWG3        bool
+}
+
+// WireguardServerPatch edits a server; a nil field keeps its value.
+type WireguardServerPatch struct {
+	ID          string
+	Description *string
+	Address     *string
+	Mask        *string
+	ListenPort  *int
+	Endpoint    *string
+	DNS         *string
+	MTU         *int
+}
+
+// WireguardServerAccess sets what clients reach; a nil field keeps it.
+type WireguardServerAccess struct {
+	ID          string
+	NATMode     *string
+	LANSegments *[]string
+	Policy      *string
+}
+
+// WireguardServerOptions lists what the server tools accept.
+type WireguardServerOptions struct {
+	LANSegments      []LANSegment `json:"lanSegments"`
+	Policies         []string     `json:"policies" jsonschema:"access policy ids a server can follow; none clears it"`
+	SuggestedAddress string       `json:"suggestedAddress,omitempty" jsonschema:"a free private subnet for a new server, host address first"`
+	SuggestedMask    string       `json:"suggestedMask,omitempty"`
+}
+
+// LANSegment is a LAN segment server clients may be let into.
+type LANSegment struct {
+	Name   string `json:"name"`
+	Label  string `json:"label,omitempty"`
+	Subnet string `json:"subnet,omitempty"`
+}
+
 // ServerPeer is one client of a WireGuard server hosted on this router.
 // The peer's private key and preshared key are NOT here: they exist in
 // storage only to render the client's .conf, which get_server_peer_config
