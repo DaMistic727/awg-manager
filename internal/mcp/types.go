@@ -476,6 +476,10 @@ const MaxDomainsInDetail = 200
 // DNSSubscription is a remote domain list feeding a routing list. Only
 // the fields that explain where the domains came from are carried over.
 type DNSSubscription struct {
+	// Ref names the subscription in removeSubscriptions: the URL above is
+	// cut to its host, so two lists from one host look the same, and a
+	// position shifts as soon as one is removed.
+	Ref         string `json:"ref" jsonschema:"stable reference to this subscription — pass it in update_dns_route's removeSubscriptions"`
 	URL         string `json:"url" jsonschema:"scheme and host of the list's address only: its path, query or userinfo can carry a token. The full address is in the web interface"`
 	Name        string `json:"name,omitempty"`
 	LastFetched string `json:"lastFetched,omitempty"`
@@ -537,8 +541,14 @@ func (d DNSRouteDetail) Summary() DNSRoute {
 // A list created through MCP is always enabled; disable it from the web UI.
 type DNSRouteInput struct {
 	Name     string   `json:"name" jsonschema:"human-readable list name"`
-	Domains  []string `json:"domains" jsonschema:"domains to route (suffix match), e.g. [\"youtube.com\"]; CIDR subnets are also accepted, geosite:/geoip: tags are not (NDMS rejects them)"`
-	TunnelID string   `json:"tunnelId" jsonschema:"target tunnel id from list_tunnels"`
+	Domains  []string `json:"domains,omitempty" jsonschema:"domains to route (suffix match), e.g. [\"youtube.com\"]; CIDR subnets are also accepted, geosite:/geoip: tags are not (NDMS rejects them). May be empty when subscriptionUrls are given"`
+	TunnelID string   `json:"tunnelId,omitempty" jsonschema:"target tunnel id from list_tunnels; give this or targets"`
+	// Targets is the ordered alternative to TunnelID: traffic goes through
+	// the first available one and fails over down the list.
+	Targets          []string `json:"targets,omitempty" jsonschema:"target ids from list_routing_targets in priority order — tunnels, NDMS interfaces (Proxy0…), WAN: traffic uses the first available one and fails over to the next; give this or tunnelId"`
+	KillSwitch       bool     `json:"killSwitch,omitempty" jsonschema:"when every target is down, block the traffic instead of letting it go out through the provider"`
+	Excludes         []string `json:"excludes,omitempty" jsonschema:"domains and subnets carved out of the list: they are NOT routed even when they match"`
+	SubscriptionURLs []string `json:"subscriptionUrls,omitempty" jsonschema:"URLs of domain lists to download into the list; each is fetched now and the list is not created if one fails or is empty"`
 }
 
 // DNSRouteUpdate is a partial edit of one list: an omitted field is left
@@ -555,7 +565,14 @@ type DNSRouteUpdate struct {
 	RouteID       string   `json:"routeId" jsonschema:"list id from list_dns_routes"`
 	Name          string   `json:"name,omitempty" jsonschema:"new list name; omit to keep the current one"`
 	ManualDomains []string `json:"manualDomains,omitempty" jsonschema:"replaces ALL of the list's own entries — domains and CIDR subnets alike — so read the current ones from get_dns_route's manualDomains (NOT domains, which includes subscription entries) and pass back everything you want to keep; omit to leave them untouched"`
-	TunnelID      string   `json:"tunnelId,omitempty" jsonschema:"send the list through this tunnel instead; omit to keep the current target"`
+	TunnelID      string   `json:"tunnelId,omitempty" jsonschema:"send the list through this one tunnel instead; omit to keep the current target. targets replaces this for several targets"`
+	// Targets, KillSwitch, Excludes and the subscription fields follow the
+	// same rule as ManualDomains: omitted leaves them as they are.
+	Targets             []string `json:"targets,omitempty" jsonschema:"replaces ALL targets with these ids from list_routing_targets, in priority order (failover down the list); omit to keep them"`
+	KillSwitch          *bool    `json:"killSwitch,omitempty" jsonschema:"true blocks the traffic when every target is down, false lets it out through the provider; omit to keep the current setting"`
+	Excludes            []string `json:"excludes,omitempty" jsonschema:"replaces ALL exclusions, domains and subnets alike — read get_dns_route's excludes AND excludeSubnets and pass back every one to keep; [] clears them; omit to keep them"`
+	AddSubscriptionURLs []string `json:"addSubscriptionUrls,omitempty" jsonschema:"domain list URLs to add; each is fetched now and the edit fails if one fails or is empty"`
+	RemoveSubscriptions []string `json:"removeSubscriptions,omitempty" jsonschema:"refs of the subscriptions to remove, from get_dns_route's subscriptions; a ref the list no longer has is refused and nothing changes"`
 }
 
 type StaticRoute struct {
@@ -572,6 +589,28 @@ type StaticRouteInput struct {
 	TunnelID string   `json:"tunnelId" jsonschema:"target tunnel id from list_tunnels"`
 	Subnets  []string `json:"subnets" jsonschema:"CIDR list, e.g. [\"10.0.0.0/8\"]"`
 	Enabled  *bool    `json:"enabled,omitempty" jsonschema:"default true"`
+	// KillSwitch maps to the list's fallback: reject when true.
+	KillSwitch bool `json:"killSwitch,omitempty" jsonschema:"when the tunnel is down, block traffic to these subnets instead of letting it out through the provider"`
+}
+
+// StaticRouteUpdate is a partial edit of a subnet list: an omitted field
+// keeps its value.
+type StaticRouteUpdate struct {
+	RouteID    string   `json:"routeId" jsonschema:"list id from list_static_routes"`
+	Name       string   `json:"name,omitempty" jsonschema:"new name; omit to keep it"`
+	TunnelID   string   `json:"tunnelId,omitempty" jsonschema:"target id from list_routing_targets; omit to keep it"`
+	Subnets    []string `json:"subnets,omitempty" jsonschema:"replaces ALL subnets of the list; omit to keep them"`
+	KillSwitch *bool    `json:"killSwitch,omitempty" jsonschema:"true blocks the traffic when the tunnel is down, false lets it out through the provider; omit to keep the setting"`
+}
+
+// RoutingTarget is something a routing list can send traffic through.
+type RoutingTarget struct {
+	ID        string `json:"id" jsonschema:"the id every routing tool takes as a target"`
+	Name      string `json:"name"`
+	Type      string `json:"type" jsonschema:"managed (a tunnel of awg-manager), system (an NDMS interface: WireGuard, Proxy0…, OpkgTun) or wan"`
+	Status    string `json:"status,omitempty" jsonschema:"running, stopped, disabled, up or down"`
+	Available bool   `json:"available" jsonschema:"can carry traffic right now; a list may still name one that is not, and fails over past it"`
+	Warning   string `json:"warning,omitempty" jsonschema:"why routes through it may not be installed; in Russian, as the web interface shows it"`
 }
 
 type ClientRoute struct {

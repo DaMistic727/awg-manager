@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -365,6 +366,53 @@ func TestServiceImpl_UpdatePartialPreservesExcludesTextSubnets(t *testing.T) {
 	}
 	if len(updated.ExcludeSubnets) != 1 || updated.ExcludeSubnets[0] != "10.0.0.0/8" {
 		t.Fatalf("updated ExcludeSubnets = %#v, want [10.0.0.0/8]", updated.ExcludeSubnets)
+	}
+}
+
+// TestServiceImpl_UpdateKeepsExcludeSubnetsWithoutText — список, созданный
+// массивами (API, MCP), не имеет ExcludesText. Правка, которая исключений
+// не касается, не должна терять их подсети; присланные отдельно подсети
+// встают рядом с доменами, а полный Excludes заменяет всё.
+func TestServiceImpl_UpdateKeepsExcludeSubnetsWithoutText(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, DomainList{
+		Name:          "array excludes",
+		ManualDomains: []string{"example.com"},
+		Excludes:      []string{"bank.example.com", "10.0.0.0/8"},
+		Routes:        []RouteTarget{{Interface: "OpkgTun0", TunnelID: "t1"}},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	updated, err := svc.Update(ctx, DomainList{ID: created.ID, Name: "renamed"})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if !slices.Equal(updated.Excludes, []string{"bank.example.com"}) || !slices.Equal(updated.ExcludeSubnets, []string{"10.0.0.0/8"}) {
+		t.Fatalf("an update not touching excludes kept %v / %v", updated.Excludes, updated.ExcludeSubnets)
+	}
+	updated, err = svc.Update(ctx, DomainList{ID: created.ID, ExcludeSubnets: []string{"192.168.5.0/24"}})
+	if err != nil {
+		t.Fatalf("Update subnets: %v", err)
+	}
+	if !slices.Equal(updated.Excludes, []string{"bank.example.com"}) || !slices.Equal(updated.ExcludeSubnets, []string{"192.168.5.0/24"}) {
+		t.Fatalf("subnets sent alone replace the subnets only: %v / %v", updated.Excludes, updated.ExcludeSubnets)
+	}
+	updated, err = svc.Update(ctx, DomainList{ID: created.ID, Excludes: []string{"other.example.com"}})
+	if err != nil {
+		t.Fatalf("Update excludes: %v", err)
+	}
+	if !slices.Equal(updated.Excludes, []string{"other.example.com"}) || len(updated.ExcludeSubnets) != 0 {
+		t.Fatalf("a full excludes list replaces both halves: %v / %v", updated.Excludes, updated.ExcludeSubnets)
+	}
+	updated, err = svc.Update(ctx, DomainList{ID: created.ID, Excludes: []string{"a.example.com"}, ExcludeSubnets: []string{"172.16.0.0/12"}})
+	if err != nil {
+		t.Fatalf("Update both: %v", err)
+	}
+	if !slices.Equal(updated.Excludes, []string{"a.example.com"}) || !slices.Equal(updated.ExcludeSubnets, []string{"172.16.0.0/12"}) {
+		t.Fatalf("excludes and subnets sent together are both kept: %v / %v", updated.Excludes, updated.ExcludeSubnets)
 	}
 }
 
@@ -762,5 +810,65 @@ func TestRoutedSubnets_LimitCountsWhatTheRouterGets(t *testing.T) {
 	}
 	if _, err := svc.Create(context.Background(), big(&skip)); err != nil {
 		t.Fatalf("with SkipIPv6 the same list is within the limit: %v", err)
+	}
+}
+
+// TestServiceImpl_UpdateWithBuildsThePatchFromTheStoredList — правку из
+// MCP, посчитанную от прочитанного раньше (подписки по ссылке, цели),
+// UpdateWith строит по списку под замком записи; её отказ ничего не пишет,
+// а списки HydraRoute сюда не идут.
+func TestServiceImpl_UpdateWithBuildsThePatchFromTheStoredList(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, DomainList{
+		Name:          "stored",
+		ManualDomains: []string{"example.com"},
+		Routes:        []RouteTarget{{Interface: "OpkgTun0", TunnelID: "t1"}},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// A web edit after the caller's read: the edit must see it.
+	if _, err := svc.Update(ctx, DomainList{ID: created.ID, ManualDomains: []string{"example.com", "web.example.com"}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	var seen DomainList
+	updated, err := svc.UpdateWith(ctx, created.ID, func(stored DomainList) (DomainList, error) {
+		seen = stored
+		return DomainList{Name: "renamed"}, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateWith: %v", err)
+	}
+	if !slices.Equal(seen.ManualDomains, []string{"example.com", "web.example.com"}) {
+		t.Fatalf("edit must see the list as stored at the write: %v", seen.ManualDomains)
+	}
+	if updated.Name != "renamed" || updated.ID != created.ID || !slices.Equal(updated.ManualDomains, seen.ManualDomains) {
+		t.Fatalf("the patch is sparse, as for Update: %+v", updated)
+	}
+
+	refused := fmt.Errorf("stale")
+	if _, err := svc.UpdateWith(ctx, created.ID, func(DomainList) (DomainList, error) { return DomainList{Name: "never"}, refused }); err != refused {
+		t.Fatalf("an edit's refusal must come back as is: %v", err)
+	}
+	if got, err := svc.Get(ctx, created.ID); err != nil || got.Name != "renamed" {
+		t.Fatalf("a refused edit must write nothing: %+v, %v", got, err)
+	}
+	// A legacy row of a HydraRoute list still in the store: its source of
+	// truth is the HR files.
+	data := svc.store.Draft()
+	data.Lists = append(data.Lists, DomainList{ID: "legacy-hr", Name: "hr", Backend: "hydraroute"})
+	if err := svc.store.Save(data); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	for _, id := range []string{"hr:1:awgm0:0", "legacy-hr", "missing"} {
+		if _, err := svc.UpdateWith(ctx, id, func(DomainList) (DomainList, error) { called = true; return DomainList{}, nil }); err == nil {
+			t.Errorf("%s: must be refused", id)
+		}
+	}
+	if called {
+		t.Fatal("edit must not run for a list UpdateWith does not take")
 	}
 }
