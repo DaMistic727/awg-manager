@@ -2265,14 +2265,25 @@ func TestLocal_PingCheckLogsAreNewestFirst(t *testing.T) {
 }
 
 type fakeDiag struct {
-	runErr error
 	status diagnostics.RunStatus
 	report []byte
 	repErr error
 	runs   int
+	opts   diagnostics.RunOptions
 }
 
-func (f *fakeDiag) Run(context.Context) error     { f.runs++; return f.runErr }
+// Start mirrors Runner.Start: a sweep in progress is not joined.
+func (f *fakeDiag) Start(opts diagnostics.RunOptions) (<-chan diagnostics.DiagEvent, bool) {
+	if f.status.Status == "running" {
+		return nil, false
+	}
+	f.runs++
+	f.opts = opts
+	ch := make(chan diagnostics.DiagEvent, 1)
+	ch <- diagnostics.DiagEvent{Type: "done"}
+	close(ch)
+	return ch, true
+}
 func (f *fakeDiag) Status() diagnostics.RunStatus { return f.status }
 func (f *fakeDiag) Result() ([]byte, error)       { return f.report, f.repErr }
 
@@ -2324,10 +2335,10 @@ func TestLocal_DiagnosticsResultWithoutAReportIsExplicit(t *testing.T) {
 // TestLocal_RunDiagnosticsAlreadyRunningIsNotAnError — но и «запустил» в
 // этом случае говорить нельзя.
 func TestLocal_RunDiagnosticsAlreadyRunning(t *testing.T) {
-	fd := &fakeDiag{runErr: errors.New("diagnostics already running"), status: diagnostics.RunStatus{Status: "running"}}
+	fd := &fakeDiag{status: diagnostics.RunStatus{Status: "running"}}
 	l := New(Config{Diagnostics: fd})
 
-	got, err := l.RunDiagnostics(context.Background())
+	got, err := l.RunDiagnostics(context.Background(), false)
 	if err != nil {
 		t.Fatalf("a sweep already in progress is not a failure: %v", err)
 	}
@@ -2337,18 +2348,28 @@ func TestLocal_RunDiagnosticsAlreadyRunning(t *testing.T) {
 	if got.Status != "running" {
 		t.Fatalf("status = %q", got.Status)
 	}
+	if fd.runs != 0 {
+		t.Fatal("a sweep in progress must not be joined: its options are not ours")
+	}
 }
 
+// TestLocal_RunDiagnosticsStarts — Runner.Run всегда добавляет
+// restart-тест, а он останавливает и запускает каждый работающий
+// kernel-туннель. Прогон из MCP без него ничего не меняет; с ним — только
+// по явной просьбе.
 func TestLocal_RunDiagnosticsStarts(t *testing.T) {
 	fd := &fakeDiag{}
 	l := New(Config{Diagnostics: fd})
 
-	got, err := l.RunDiagnostics(context.Background())
+	got, err := l.RunDiagnostics(context.Background(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Started || fd.runs != 1 {
-		t.Fatalf("got %+v after %d runs", got, fd.runs)
+	if !got.Started || fd.runs != 1 || fd.opts.IncludeRestart || fd.opts.TunnelID != "" {
+		t.Fatalf("got %+v after %d runs with %+v", got, fd.runs, fd.opts)
+	}
+	if _, err := l.RunDiagnostics(context.Background(), true); err != nil || !fd.opts.IncludeRestart {
+		t.Fatalf("the restart test must be passed on when asked: %+v, %v", fd.opts, err)
 	}
 }
 

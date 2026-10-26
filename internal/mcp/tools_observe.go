@@ -98,10 +98,24 @@ func registerObservabilityTools(s *mcp.Server, d Deps) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "run_diagnostics",
 		Description: "Start a full diagnostic sweep of the router in the background: interfaces, routes, firewall, kernel module, per-tunnel checks. " +
-			"It takes tens of seconds; call get_diagnostics afterwards for the outcome. Changes nothing.",
+			"It takes tens of seconds; call get_diagnostics afterwards for the outcome. Changes nothing: the restart test, which stops and starts tunnels, is run_diagnostics_with_restart.",
 		Annotations: readOnly("Run diagnostics"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, DiagnosticsRun, error) {
-		out, err := d.RunDiagnostics(ctx)
+		out, err := d.RunDiagnostics(ctx, false)
+		return nil, out, err
+	})
+
+	// The restart test is a tool of its own, not an argument: a host decides
+	// from the annotations alone whether to ask the user, and readOnlyHint
+	// cannot depend on an argument. As a write, it is closed to a read-only
+	// key by the scope middleware, like every other write.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "run_diagnostics_with_restart",
+		Description: "The full diagnostic sweep of run_diagnostics plus the restart test: every running kernel tunnel is stopped and started to time the cycle, which drops its connections for a few seconds. " +
+			"Ask the user first. Runs in the background; call get_diagnostics afterwards for the outcome.",
+		Annotations: safeWrite("Run diagnostics with the restart test", false),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, DiagnosticsRun, error) {
+		out, err := d.RunDiagnostics(ctx, true)
 		return nil, out, err
 	})
 

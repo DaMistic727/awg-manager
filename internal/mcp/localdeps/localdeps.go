@@ -80,7 +80,7 @@ type (
 	}
 	// DiagnosticsRunner is the subset of *diagnostics.Runner MCP uses.
 	DiagnosticsRunner interface {
-		Run(ctx context.Context) error
+		Start(opts diagnostics.RunOptions) (events <-chan diagnostics.DiagEvent, started bool)
 		Status() diagnostics.RunStatus
 		Result() ([]byte, error)
 	}
@@ -1778,19 +1778,25 @@ func (l *Local) PingCheckLogs(_ context.Context, tunnelID string, limit int) ([]
 	return out, nil
 }
 
-// RunDiagnostics starts a sweep. A sweep already in progress is not an
-// error — the caller simply must not report a fresh run, hence Started.
-func (l *Local) RunDiagnostics(ctx context.Context) (mcpsrv.DiagnosticsRun, error) {
+// RunDiagnostics starts a full sweep through Runner.Start, which takes the
+// options: Runner.Run always adds the restart test, and that stops and
+// starts every running kernel tunnel — not what a read is allowed to do.
+// Start refuses to join a sweep already in progress, in the same step as
+// the check: that sweep's options are not ours. That is not an error — the
+// caller simply must not report a fresh run, hence Started. The events are
+// drained and dropped; get_diagnostics reads the report.
+func (l *Local) RunDiagnostics(_ context.Context, includeRestart bool) (mcpsrv.DiagnosticsRun, error) {
 	if l.c.Diagnostics == nil {
 		return mcpsrv.DiagnosticsRun{}, errUnavailable("diagnostics")
 	}
-	if err := l.c.Diagnostics.Run(ctx); err != nil {
-		st := l.c.Diagnostics.Status()
-		if st.Status == "running" {
-			return mcpsrv.DiagnosticsRun{Started: false, Status: "running", Message: "a diagnostic sweep was already running; call get_diagnostics for its outcome"}, nil
-		}
-		return mcpsrv.DiagnosticsRun{}, err
+	events, started := l.c.Diagnostics.Start(diagnostics.RunOptions{IncludeRestart: includeRestart})
+	if !started {
+		return mcpsrv.DiagnosticsRun{Started: false, Status: "running", Message: "a diagnostic sweep was already running; call get_diagnostics for its outcome — it may or may not include the restart test"}, nil
 	}
+	go func() {
+		for range events {
+		}
+	}()
 	return mcpsrv.DiagnosticsRun{Started: true, Status: "running", Message: "started; call get_diagnostics in about half a minute"}, nil
 }
 
