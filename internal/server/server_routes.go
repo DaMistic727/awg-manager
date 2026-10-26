@@ -1225,6 +1225,7 @@ func (s *Server) registerMcpRoutes(mux *http.ServeMux, h *routeHandlers) {
 		Managed:         managedForMcp,
 		Connections:     connsForMcp,
 		Router:          routerForMcp,
+		TunnelEdit:      h.tunnelsHandler.EditTunnelWith,
 		FakeIP:          fakeipForMcp,
 		DNSRewrites:     rewritesForMcp,
 		Diagnostics:     diagForMcp,
