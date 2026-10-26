@@ -293,6 +293,38 @@ type SingboxRouterStatus struct {
 	RestartSuppressedUntil string            `json:"restartSuppressedUntil,omitempty" jsonschema:"RFC 3339; set when crashes made awg-manager stop restarting sing-box until then"`
 }
 
+// SingboxRouterSettingsPatch edits the router's engine settings; a nil
+// field keeps its value.
+type SingboxRouterSettingsPatch struct {
+	Sniffer       *bool
+	UDPTimeout    *string
+	BypassPorts   *string
+	BypassSubnets *string
+	PolicyName    *string
+	DeviceMode    *string
+}
+
+// SingboxUserConfig is the expert configuration slot (90-user.json).
+type SingboxUserConfig struct {
+	Content   string `json:"content" jsonschema:"the slot's JSON as it stands — the draft when there is one"`
+	Truncated bool   `json:"truncated,omitempty" jsonschema:"true when the content is longer than returned; the web interface shows it whole"`
+	HasDraft  bool   `json:"hasDraft" jsonschema:"true means content is a draft not applied yet"`
+	Enabled   bool   `json:"enabled" jsonschema:"the slot takes part in the running configuration"`
+	// Revision is the content's, untruncated, for save's expectRevision.
+	Revision string `json:"revision,omitempty" jsonschema:"names this content; pass it to save_singbox_user_config as expectRevision (and to apply_singbox_user_config when content is the draft). Empty when truncated: a cut copy cannot be saved back — it would drop the rest of the file"`
+	Size     int    `json:"size" jsonschema:"bytes in the whole slot"`
+}
+
+// SingboxConfigCheck is the outcome of checking or applying the expert
+// configuration against the rest of sing-box's.
+type SingboxConfigCheck struct {
+	Ok       bool     `json:"ok" jsonschema:"false means sing-box would refuse the merged configuration — nothing is applied"`
+	Errors   []string `json:"errors,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	// Revision is set by save: the draft just written, for apply.
+	Revision string `json:"revision,omitempty" jsonschema:"save only: the revision of the draft just saved — pass it to apply_singbox_user_config as expectRevision"`
+}
+
 // SingboxQoSClass is one DSCP routing class.
 type SingboxQoSClass struct {
 	Name     string `json:"name"`

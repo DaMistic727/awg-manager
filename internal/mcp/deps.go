@@ -181,6 +181,25 @@ type Deps interface {
 	// configuration order. hasDraft is ListSingboxRules's: the list comes
 	// from the draft when one exists.
 	ListSingboxDNSServers(ctx context.Context) (servers []SingboxDNSServer, hasDraft bool, err error)
+	// SwitchSingboxRouterMode starts a switch of the routing mode (off,
+	// tproxy, fakeip-tun, policy-tun) and returns at once: the switch tears
+	// the old mode down and brings the new one up, rolling back on failure,
+	// and takes tens of seconds.
+	SwitchSingboxRouterMode(ctx context.Context, mode string) error
+	// UpdateSingboxRouterSettings applies the patch over the stored
+	// settings and returns the router's status afterwards.
+	UpdateSingboxRouterSettings(ctx context.Context, p SingboxRouterSettingsPatch) (SingboxRouterStatus, error)
+	// The expert configuration slot (90-user.json): read (it may hold
+	// credentials), save a draft, check it against the merged configuration,
+	// apply or discard it.
+	GetSingboxUserConfig(ctx context.Context) (SingboxUserConfig, error)
+	// SaveSingboxUserConfig replaces the draft; expectRevision, when not
+	// empty, must name the slot as it stands (GetSingboxUserConfig).
+	SaveSingboxUserConfig(ctx context.Context, content []byte, expectRevision string) (SingboxConfigCheck, error)
+	// ApplySingboxUserConfig applies the draft only when it is the one
+	// expectRevision names (save's result), checked under the commit's lock.
+	ApplySingboxUserConfig(ctx context.Context, expectRevision string) (SingboxConfigCheck, error)
+	DiscardSingboxUserConfig(ctx context.Context) error
 	// SingboxRouterStatus describes how the router is set up and whether
 	// it works. It asks NDMS and probes the kernel, as the web page does,
 	// so it is slower than the lists.
