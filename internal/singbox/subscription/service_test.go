@@ -1951,12 +1951,15 @@ func TestAddManualMember_ExactRepeatRejected(t *testing.T) {
 }
 
 // Другая учётка на том же адресе — не повтор: при общем пароле naive-логины
-// различаются только username, у vless — только uuid (F734).
+// различаются только username, у vless — только uuid (F734), у hysteria2 —
+// только паролем обфускации (F737).
 func TestAddManualMember_OtherAccountOnSameEndpoint(t *testing.T) {
 	for _, tc := range []struct{ seed, other string }{
 		{"naive+https://alice:shared@h.example:443#A", "naive+https://bob:shared@h.example:443#B"},
 		{"vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=a.sni#A",
 			"vless://3a3b1c2e-9999-4321-aaaa-1234567890cd@h.example:443?security=tls&sni=a.sni#B"},
+		{"hysteria2://shared@h.example:443?sni=h&obfs=salamander&obfs-password=one#A",
+			"hysteria2://shared@h.example:443?sni=h&obfs=salamander&obfs-password=two#B"},
 	} {
 		svc, _ := newTestService(t)
 		sub, err := svc.Create(context.Background(), CreateInput{Label: "manual", Inline: tc.seed, Enabled: true})
@@ -1974,6 +1977,25 @@ func TestAddManualMember_OtherAccountOnSameEndpoint(t *testing.T) {
 		// поймать его может только сравнение тел, а не совпадение тегов.
 		if _, err := svc.AddManualMember(context.Background(), sub.ID, tc.seed); !errors.Is(err, ErrMemberDuplicate) {
 			t.Fatalf("%s: repeat must be ErrMemberDuplicate, got %v", tc.seed, err)
+		}
+	}
+}
+
+// Ручные варианты одного сервера с разным шифром получают разные теги: тег
+// считается по wire, а не по cred, иначе третий вариант совпал бы тегом со
+// вторым и был бы отвергнут как коллизия (F737).
+func TestAddManualMember_CipherVariantsGetDistinctTags(t *testing.T) {
+	svc, _ := newTestService(t)
+	ss := func(method string) string {
+		return "ss://" + method + ":shared@h.example:8388#" + method
+	}
+	sub, err := svc.Create(context.Background(), CreateInput{Label: "manual", Inline: ss("aes-128-gcm"), Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{"aes-256-gcm", "chacha20-ietf-poly1305"} {
+		if _, err := svc.AddManualMember(context.Background(), sub.ID, ss(method)); err != nil {
+			t.Fatalf("%s must add, got %v", method, err)
 		}
 	}
 }
