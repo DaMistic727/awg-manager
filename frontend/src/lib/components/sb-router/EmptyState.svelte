@@ -193,7 +193,7 @@
       padding-inline: 0.5rem;
     }
 
-    .stepper :global(.label),
+    .stepper :global(.pill-label),
     .stepper :global(.step-label),
     .stepper :global(.wizard-step-label) {
       min-width: 0;
@@ -253,8 +253,7 @@
     :global(.wz-step :global(button)),
     :global(.wz-step :global(.btn)),
     :global(.wz-step :global(select)),
-    :global(.wz-step :global(.dropdown)),
-    :global(.wz-step :global(.select)) {
+    :global(.wz-step :global(.dropdown)) {
       min-width: 0;
       max-width: 100%;
     }
