@@ -427,3 +427,129 @@ func TestCreateBatch_ErrorLeavesCacheUntouched(t *testing.T) {
 		}
 	}
 }
+
+// fillDomains — n уникальных доменов с префиксом.
+func fillDomains(prefix string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = fmt.Sprintf("%s%d.example", prefix, i)
+	}
+	return out
+}
+
+func mustUpdateDomains(t *testing.T, svc *ServiceImpl, l *DomainList, domains []string) {
+	t.Helper()
+	upd := *l
+	upd.ManualDomains = domains
+	text := strings.Join(domains, "\n")
+	upd.ManualText = &text
+	if _, err := svc.Update(context.Background(), upd); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// #1107: список вырос, и у него появился новый пакет — пакет встаёт сразу за
+// своими, а не в хвост за чужими правилами (первая совпавшая группа выигрывает).
+func TestIssue1107_NewPackFollowsItsSiblings(t *testing.T) {
+	r := newFakeRouter()
+	svc := newServiceWithRouter(t, r)
+	big := mustCreate(t, svc, "big", "Wireguard1")
+	mustUpdateDomains(t, svc, big, fillDomains("a", MaxDomainsPerGroup))
+	mustCreate(t, svc, "other", "Wireguard2")
+	assertSeq(t, "до роста", r.groupOrder(), "big_p1", "other_p1")
+
+	mustUpdateDomains(t, svc, big, fillDomains("a", 2*MaxDomainsPerGroup+5))
+
+	assertSeq(t, "после роста", r.groupOrder(), "big_p1", "big_p2", "big_p3", "other_p1")
+}
+
+// Новое правило (своих пакетов нет) — по-прежнему в хвост.
+func TestIssue1107_NewListStaysAtTail(t *testing.T) {
+	r := newFakeRouter()
+	svc := newServiceWithRouter(t, r)
+	mustCreate(t, svc, "first", "Wireguard1")
+	mustCreate(t, svc, "second", "Wireguard2")
+	assertSeq(t, "порядок групп", r.groupOrder(), "first_p1", "second_p1")
+}
+
+// Перестановка отвергнута (OS4, сбой RCI) — пакет остаётся в хвосте, как до
+// правки, обновление списка не падает.
+func TestIssue1107_MoveFailureKeepsTailNoError(t *testing.T) {
+	r := newFakeRouter()
+	svc := newServiceWithRouter(t, r)
+	big := mustCreate(t, svc, "big", "Wireguard1")
+	mustUpdateDomains(t, svc, big, fillDomains("a", MaxDomainsPerGroup))
+	mustCreate(t, svc, "other", "Wireguard2")
+	r.mu.Lock()
+	r.failRule = true
+	r.mu.Unlock()
+
+	mustUpdateDomains(t, svc, big, fillDomains("a", MaxDomainsPerGroup+5))
+
+	assertSeq(t, "после роста", r.groupOrder(), "big_p1", "other_p1", "big_p2")
+}
+
+// Пакет с несколькими туннелями встаёт целым блоком в прежнем порядке строк.
+func TestIssue1107_MultiTunnelPackMovesAsBlock(t *testing.T) {
+	r := newFakeRouter()
+	svc := newServiceWithRouter(t, r)
+	big := mustCreate(t, svc, "big", "Wireguard1", "Wireguard3")
+	mustUpdateDomains(t, svc, big, fillDomains("a", MaxDomainsPerGroup))
+	mustCreate(t, svc, "other", "Wireguard2")
+
+	mustUpdateDomains(t, svc, big, fillDomains("a", MaxDomainsPerGroup+5))
+
+	assertSeq(t, "после роста", r.groupOrder(), "big_p1", "big_p2", "other_p1")
+	assertSeq(t, "big_p2", r.ifaceOrder("big_p2"), "Wireguard1", "Wireguard3")
+}
+
+// Новый список из многих пакетов ложится по номеру (p2 раньше p10) без единой
+// перестановки и без чтения порядка строк — перестановка только для пакета
+// списка, у которого на роутере уже есть строки (#1107, ревью: цена импорта).
+func TestIssue1107_NewBigListNumericOrderNoMoves(t *testing.T) {
+	r := newFakeRouter()
+	svc := newServiceWithRouter(t, r)
+	reads0 := r.routeReads()
+	mustCreate(t, svc, "first", "Wireguard2")
+	smallReads := r.routeReads() - reads0
+	before, reads1 := r.indexedCount(), r.routeReads()
+	if _, err := svc.Create(context.Background(), DomainList{
+		Name: "big", ManualDomains: fillDomains("a", 11*MaxDomainsPerGroup+1), Routes: routes("Wireguard1"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"first_p1"}
+	for i := 1; i <= 12; i++ {
+		want = append(want, fmt.Sprintf("big_p%d", i))
+	}
+	assertSeq(t, "порядок групп", r.groupOrder(), want...)
+	if got := r.indexedCount() - before; got != 0 {
+		t.Errorf("перестановок/правок по index при создании нового списка: %d, ожидалось 0", got)
+	}
+	if got := r.routeReads() - reads1; got != smallReads {
+		t.Errorf("чтений порядка строк при создании списка из 12 пакетов: %d, у списка из одного — %d", got, smallReads)
+	}
+}
+
+func (r *fakeRouter) routeReads() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rcRouteReads
+}
+
+// Рост через десятый пакет: p10 и p11 встают за p9, а не лексически за p1.
+func TestIssue1107_GrowthPastNinePacks(t *testing.T) {
+	r := newFakeRouter()
+	svc := newServiceWithRouter(t, r)
+	big := mustCreate(t, svc, "big", "Wireguard1")
+	mustUpdateDomains(t, svc, big, fillDomains("a", 9*MaxDomainsPerGroup))
+	mustCreate(t, svc, "other", "Wireguard2")
+
+	mustUpdateDomains(t, svc, big, fillDomains("a", 10*MaxDomainsPerGroup+5))
+
+	var want []string
+	for i := 1; i <= 11; i++ {
+		want = append(want, fmt.Sprintf("big_p%d", i))
+	}
+	assertSeq(t, "порядок групп", r.groupOrder(), append(want, "other_p1")...)
+}
