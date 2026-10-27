@@ -12,7 +12,11 @@
 	let { embedded = true }: Props = $props();
 
 	let cfg = $state<HydraRouteConfig | null>(null);
-	let dirty = $state(false);
+	// Отправляются только изменённые поля: cfg — снимок с момента открытия
+	// вкладки, и запись целиком откатила бы порядок политик и правки MCP,
+	// сделанные за это время (F728).
+	let changes = $state<Partial<HydraRouteConfig>>({});
+	const dirty = $derived(Object.keys(changes).length > 0);
 	let saving = $state(false);
 	let err = $state('');
 	let advancedOpen = $state(false);
@@ -21,7 +25,7 @@
 		err = '';
 		try {
 			cfg = await api.getHydraRouteConfig();
-			dirty = false;
+			changes = {};
 		} catch (e: unknown) {
 			err = e instanceof Error ? e.message : String(e);
 		}
@@ -31,10 +35,15 @@
 		if (!cfg) return;
 		saving = true;
 		err = '';
+		// Правка, сделанная, пока запрос в полёте, остаётся в changes: ответ
+		// сервера её не стирает, а при ошибке отправленное возвращается.
+		const sent = changes;
+		changes = {};
 		try {
-			cfg = await api.updateHydraRouteConfig(cfg);
-			dirty = false;
+			const saved = await api.updateHydraRouteConfig(sent);
+			cfg = { ...saved, ...changes };
 		} catch (e: unknown) {
+			changes = { ...sent, ...changes };
 			err = e instanceof Error ? e.message : String(e);
 		} finally {
 			saving = false;
@@ -48,7 +57,7 @@
 	function touch<K extends keyof HydraRouteConfig>(key: K, val: HydraRouteConfig[K]) {
 		if (!cfg) return;
 		cfg = { ...cfg, [key]: val };
-		dirty = true;
+		changes = { ...changes, [key]: val };
 	}
 </script>
 

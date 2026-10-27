@@ -507,6 +507,18 @@ type ServiceImpl struct {
 	// enable/disable (which SwitchRoutingMode composes) take mu themselves, so
 	// holding mu across the whole switch would self-deadlock.
 	transitionMu sync.Mutex
+	// routerCfgMu / fakeipCfgMu сериализуют правки слота через withConfig /
+	// fakeipWithConfig: «прочитал → мутатор → записал» без замка терял
+	// параллельную правку (веб + MCP, F727). Порядок: после mu и
+	// transitionMu; под ними ни mu, ни transitionMu не берутся, событие
+	// публикуется уже после отпускания. Системные записи слота fakeip
+	// (enableFakeIPTun, healTunSettings, heal1140SlotMigration) берут
+	// fakeipCfgMu — черновика у fakeip нет, они пишут тот же файл (F741).
+	// ApplyStaging/DiscardStaging берут routerCfgMu: черновик пишет и
+	// withConfig. Системные записи применённого 20-router.json замок не берут:
+	// пользовательская правка идёт в черновик, а они все под transitionMu.
+	routerCfgMu sync.Mutex
+	fakeipCfgMu sync.Mutex
 	// transitionReadinessProgress emits readiness heartbeats during
 	// waitForSingbox while SwitchRoutingMode is in flight (nil otherwise).
 	transitionReadinessProgress func(message string)
@@ -1152,18 +1164,26 @@ func (s *ServiceImpl) persistConfig(ctx context.Context, cfg *RouterConfig) erro
 }
 
 func (s *ServiceImpl) withConfig(ctx context.Context, event string, fn func(*RouterConfig) error) error {
-	cfg, err := s.loadRouterConfig()
+	cfg, err := func() (*RouterConfig, error) {
+		s.routerCfgMu.Lock()
+		defer s.routerCfgMu.Unlock()
+		cfg, err := s.loadRouterConfig()
+		if err != nil {
+			return nil, err
+		}
+		cfg = s.ruleSetMaterializer().restoreConfig(cfg)
+		if err := fn(cfg); err != nil {
+			return nil, err
+		}
+		if err := s.ensureDNSChainOverlayFromState(cfg); err != nil {
+			return nil, err
+		}
+		if err := s.persistConfig(ctx, cfg); err != nil {
+			return nil, err
+		}
+		return cfg, nil
+	}()
 	if err != nil {
-		return err
-	}
-	cfg = s.ruleSetMaterializer().restoreConfig(cfg)
-	if err := fn(cfg); err != nil {
-		return err
-	}
-	if err := s.ensureDNSChainOverlayFromState(cfg); err != nil {
-		return err
-	}
-	if err := s.persistConfig(ctx, cfg); err != nil {
 		return err
 	}
 	s.emitCfgEvent(event, cfg)
