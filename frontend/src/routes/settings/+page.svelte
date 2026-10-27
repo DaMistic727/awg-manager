@@ -5,36 +5,32 @@
 	import { afterNavigate } from "$app/navigation";
 	import { page } from "$app/stores";
 	import { api } from "$lib/api/client";
-	import { singboxErrorText } from "$lib/utils/singboxError";
 	import { notifications } from "$lib/stores/notifications";
 	import { singboxStatus } from "$lib/stores/singbox";
-	import { hydrarouteStatus } from "$lib/stores/hydraroute";
-	import { zapretStatusIfExpert } from "$lib/stores/zapret";
-	import { runZapretControl } from '$lib/components/zapret';
-	import { mcpKeys } from "$lib/stores/mcpKeys";
-	import type { PollingState } from "$lib/stores/polling";
 	import { PageContainer, PageHeader, LoadingSpinner } from "$lib/components/layout";
-	import { Toggle, Modal, Button, ConfirmModal, SegmentedControl } from "$lib/components/ui";
+	import { Toggle, Button, SegmentedControl } from "$lib/components/ui";
 	import {
 		SystemInfoGrid,
 		LoggingSettings,
 		UpdateSection,
 		DownloadSettings,
 		DnsRouteSettings,
-		IntegrationsCard,
+		IntegrationsSection,
 		ThemeSchemeCard,
 		SettingsFooter,
 		UsageLevelCard,
-		HttpServerCard,
+		AccessCard,
+		PingTargetsCard,
+		AdvancedCard,
+		ServiceActionsCard,
 		BackupRestoreCard,
 		DevelopChannelGateModal,
 		ExperimentalSettingsCard,
 		PukhososPatrol,
 		SettingsSectionLabel,
-		McpCard,
+		McpSection,
 		ObfuscatorRelayCard,
 	} from "$lib/components/settings";
-	import HappKeysModal from "$lib/components/subscriptions/HappKeysModal.svelte";
 	import { setSettings as setGlobalSettings } from "$lib/stores/settings";
 	import {
 		downloadOutbounds,
@@ -47,11 +43,7 @@
 		SystemInfo,
 		Settings,
 		UpdateInfo,
-		McpKey,
-		McpKeyCreated,
-		ZapretControlAction,
 	} from "$lib/types";
-	import { proxyInstallStatus, type ProxySubsystem } from "$lib/stores/proxyInstall";
 	import {
 		usageLevelLabel,
 		isAppearanceSettingsVisible,
@@ -62,35 +54,19 @@
 		type UsageLevel,
 	} from "$lib/types/usageLevel";
 	import { usageLevel } from "$lib/stores/settings";
-	import { m, type UiText } from "$lib/i18n";
-	import RichText from "$lib/components/ui/RichText.svelte";
-	import { waitForBackendRestart } from "$lib/restartRecovery";
+	import { m } from "$lib/i18n";
 	import { hasDevelopChannelQuizPassed } from "$lib/utils/developChannelGate";
-	import { developFeedbackFabVisible } from "$lib/stores/developFeedbackFab";
 	import { experimentalSettingsUnlocked } from "$lib/stores/experimentalSettingsUnlocked";
 	import { settingsUpdateHighlight } from "$lib/stores/settingsUpdateHighlight";
 	import {
 		CircleArrowDown,
-		Lock,
 		CloudDownload,
 		ScrollText,
-		Activity,
-		Wrench,
-		Power,
 	} from "lucide-svelte";
 	import { downloadErrorToText } from "$lib/utils/downloadError";
-	import { copyToClipboard } from "$lib/utils/clipboard";
-	import {
-		clampSessionTtlHours,
-		SESSION_TTL_DEFAULT_HOURS,
-		SESSION_TTL_MIN_HOURS,
-		SESSION_TTL_MAX_HOURS,
-	} from "$lib/components/settings/sessionTtl";
 
 	const expandUsageLevel = $derived($page.url.searchParams.has('mode'));
 	const highlightFeedbackFab = $derived($page.url.searchParams.has('feedbackFab'));
-	const defaultPingTarget = "8.8.8.8";
-	const defaultConnectivityCheckUrl = "http://connectivitycheck.gstatic.com/generate_204";
 	const highlightDownloads = $derived($page.url.searchParams.get('highlight') === 'downloads');
 
 	let systemInfo: SystemInfo | null = $state(null);
@@ -105,161 +81,14 @@
 	const downloadRouteLabel = $derived(resolveDownloadRouteLabel(settings, $downloadOutbounds));
 	const visibleDownloadRouteLabel = $derived(showDownloadRouteDetails ? downloadRouteLabel : '');
 	let updateInfo: UpdateInfo | null = $state(null);
-	let restarting = $state(false);
-	let restartConfirmOpen = $state(false);
-	let hydraBusy = $state(false);
-	let singboxInstalling = $state(false);
-	let singboxUninstalling = $state(false);
-	let singboxInstallError = $state<UiText | null>(null);
-	let singboxUpdating = $state(false);
-	let singboxUpdateError = $state<UiText | null>(null);
-	let singboxBusy = $state(false);
-	let ndmsProxyBusy = $state(false);
-	let ndmsProxyConfirmOpen = $state(false);
-	let ndmsProxyConfirmEnable = $state(false); // true = подтверждение включения; false = выключения
 	let systemInfoRefreshing = $state(false);
 	let systemInfoUpdatedAt = $state<string | null>(null);
 	let systemInfoInFlight: Promise<void> | null = null;
 	let developGateOpen = $state(false);
 	let footerPatrolWidth = $state(0);
-	let showHappKeysModal = $state(false);
 
 	const singboxStatusValue = $derived($singboxStatus.data ?? null);
-	const singboxStatusLoading = $derived(
-		$singboxStatus.lastFetchedAt === 0 &&
-		($singboxStatus.status === 'idle' || $singboxStatus.status === 'loading')
-	);
 	const singboxInstalled = $derived(singboxStatusValue?.installed ?? false);
-	const singboxRunning = $derived(singboxStatusValue?.running ?? false);
-	const ndmsProxyEnabled = $derived(singboxStatusValue?.ndmsProxyEnabled ?? true);
-	const hydraStatusValue = $derived($hydrarouteStatus.data ?? null);
-	const hydraStatusLoading = $derived(
-		$hydrarouteStatus.lastFetchedAt === 0 &&
-		($hydrarouteStatus.status === 'idle' || $hydrarouteStatus.status === 'loading')
-	);
-	const hydraStatusError = $derived($hydrarouteStatus.error);
-	const hydraInstalled = $derived(hydraStatusValue?.installed ?? false);
-	const hydraRunning = $derived(hydraStatusValue?.running ?? false);
-	const zapretStatusValue = $derived($zapretStatusIfExpert?.data ?? null);
-	const zapretInstalled = $derived(zapretStatusValue?.installed ?? false);
-	const zapretRunning = $derived(zapretStatusValue?.running ?? false);
-	let zapretBusy = $state(false);
-
-	function handleNDMSProxyToggleClick(next: boolean) {
-		// next — желаемое состояние после клика. Открываем confirm-modal
-		// с предупреждением (warning-only — мы не сканим NDMS-policies).
-		ndmsProxyConfirmEnable = next;
-		ndmsProxyConfirmOpen = true;
-	}
-
-	async function applyNDMSProxyToggle() {
-		const enabled = ndmsProxyConfirmEnable;
-		ndmsProxyBusy = true;
-		try {
-			const res = await api.singboxToggleNDMSProxy(enabled);
-			ndmsProxyConfirmOpen = false;
-			// Обновим стор статуса оптимистично — SSE invalidate тоже придёт.
-			if (singboxStatusValue) {
-				singboxStatus.applyMutationResponse({ ...singboxStatusValue, ndmsProxyEnabled: res.enabled });
-			}
-			notifications.success(
-				res.migrated
-					? (enabled ? m.settings_page_ndms_proxy_enabled_toast() : m.settings_page_ndms_proxy_disabled_toast())
-					: m.settings_page_state_unchanged(),
-			);
-		} catch (e) {
-			const msg = e instanceof Error ? e.message : m.settings_page_ndms_proxy_toggle_failed();
-			if (msg.includes('PROXY_COMPONENT_MISSING') || msg.includes("'proxy'")) {
-				notifications.error(m.settings_page_ndms_component_missing());
-			} else {
-				notifications.error(msg);
-			}
-		} finally {
-			ndmsProxyBusy = false;
-		}
-	}
-
-	async function controlSingbox(action: 'start' | 'stop' | 'restart') {
-		singboxBusy = true;
-		try {
-			const fresh = await api.singboxControl(action);
-			singboxStatus.applyMutationResponse(fresh);
-			notifications.success(
-				action === 'restart' ? m.settings_page_singbox_restarted() :
-				action === 'stop' ? m.settings_page_singbox_stopped() : m.settings_page_singbox_started(),
-			);
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_singbox_control_failed());
-		} finally {
-			singboxBusy = false;
-		}
-	}
-
-	async function controlHydra(action: 'start' | 'stop' | 'restart') {
-		hydraBusy = true;
-		try {
-			const fresh = await api.controlHydraRoute(action);
-			hydrarouteStatus.applyMutationResponse(fresh);
-			notifications.success(
-				action === 'restart' ? m.settings_page_hydra_restarted() :
-				action === 'stop' ? m.settings_page_hydra_stopped() : m.settings_page_hydra_started(),
-			);
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_hydra_control_failed());
-		} finally {
-			hydraBusy = false;
-		}
-	}
-
-	async function controlZapret(action: ZapretControlAction) {
-		zapretBusy = true;
-		try {
-			await runZapretControl(action, zapretStatusValue?.base ?? '');
-		} finally {
-			zapretBusy = false;
-		}
-	}
-
-	async function installSingbox() {
-		singboxInstalling = true;
-		singboxInstallError = null;
-		try {
-			const fresh = await api.singboxInstall();
-			singboxStatus.applyMutationResponse(fresh);
-			notifications.success(m.settings_page_singbox_installed());
-		} catch (e) {
-			singboxInstallError = singboxErrorText(e);
-		} finally {
-			singboxInstalling = false;
-		}
-	}
-
-	async function uninstallSingbox() {
-		singboxUninstalling = true;
-		try {
-			const fresh = await api.singboxUninstall();
-			singboxStatus.applyMutationResponse(fresh);
-			notifications.success(m.settings_page_singbox_removed());
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_singbox_remove_failed());
-		} finally {
-			singboxUninstalling = false;
-		}
-	}
-
-	async function updateSingbox() {
-		singboxUpdating = true;
-		singboxUpdateError = null;
-		try {
-			const fresh = await api.singboxUpdate();
-			singboxStatus.applyMutationResponse(fresh);
-			notifications.success(m.settings_page_singbox_updated());
-		} catch (e) {
-			singboxUpdateError = singboxErrorText(e);
-		} finally {
-			singboxUpdating = false;
-		}
-	}
 
 	async function fetchSystemInfo(silent = true) {
 		if (systemInfoInFlight) {
@@ -303,22 +132,30 @@
 		);
 	}
 
-	async function selectDownloadRoute(routeTag: string, routeKind?: 'direct' | 'awg' | 'singbox' | 'subscription') {
+	// Общая схема сохранения настроек: запрос → общий стор → уведомление.
+	// backendError — показать текст ошибки бэкенда (валидация), иначе fail.
+	async function save(request: () => Promise<Settings>, ok: string, fail: string, backendError = false) {
 		if (!settings) return;
 		saving = true;
 		try {
-			const normalizedTag = routeTag.trim() || 'direct';
-			const normalizedKind = normalizedTag === 'direct' ? 'direct' : routeKind;
-			settings = await api.updateSettings({
-				download: { routeTag: normalizedTag, routeKind: normalizedKind },
-			});
+			settings = await request();
 			setGlobalSettings(settings);
-			notifications.success(m.settings_page_download_route_saved());
-		} catch {
-			notifications.error(m.settings_page_download_route_save_failed());
+			notifications.success(ok);
+		} catch (e) {
+			notifications.error(backendError && e instanceof Error ? e.message : fail);
 		} finally {
 			saving = false;
 		}
+	}
+
+	function selectDownloadRoute(routeTag: string, routeKind?: 'direct' | 'awg' | 'singbox' | 'subscription') {
+		const normalizedTag = routeTag.trim() || 'direct';
+		const normalizedKind = normalizedTag === 'direct' ? 'direct' : routeKind;
+		return save(
+			() => api.updateSettings({ download: { routeTag: normalizedTag, routeKind: normalizedKind } }),
+			m.settings_page_download_route_saved(),
+			m.settings_page_download_route_save_failed(),
+		);
 	}
 
 	function scrollToSettingsHashTarget() {
@@ -337,77 +174,6 @@
 			document.getElementById("feedback-fab")?.scrollIntoView({ behavior: "smooth", block: "center" });
 		});
 	}
-
-	// ── подсистемы прокси (WDTT, FreeTurn, обфускаторы) ─────────────
-	// Бинари ставятся и снимаются целиком подсистемой: version-файл у половин
-	// общий, а раздельный снос сделал бы статус неоднозначным.
-	//
-	// Статус живёт в polling-store, подписанном на `proxyrt.instances`: удаление
-	// инстанса в другой вкладке иначе оставило бы кнопку «Удалить» запертой до
-	// перезагрузки страницы.
-	const PROXY_SUBSYSTEMS = [
-		{ key: 'wdtt' as const, label: 'WDTT' },
-		{ key: 'freeturn' as const, label: 'FreeTurn' },
-		{ key: 'obf-phobos' as const, label: 'wg-obfuscator (Phobos)' },
-		{ key: 'obf-clusterm' as const, label: 'wg-obfuscator (ClusterM)' },
-	];
-	let proxyBusy = $state<Record<string, boolean>>({});
-
-	// Автоподписка `$store` работает только с идентификатором, поэтому
-	// store'ы разложены по переменным.
-	const wdttInstallStore = proxyInstallStatus.wdtt;
-	const freeturnInstallStore = proxyInstallStatus.freeturn;
-	const obfPhobosInstallStore = proxyInstallStatus['obf-phobos'];
-	const obfClusterMInstallStore = proxyInstallStatus['obf-clusterm'];
-	const proxyStatuses = $derived({
-		wdtt: $wdttInstallStore.data,
-		freeturn: $freeturnInstallStore.data,
-		'obf-phobos': $obfPhobosInstallStore.data,
-		'obf-clusterm': $obfClusterMInstallStore.data,
-	});
-
-	async function runProxyBinaries(
-		subsystem: ProxySubsystem,
-		action: () => Promise<void>,
-		okMessage: string,
-		failMessage: string,
-	) {
-		proxyBusy = { ...proxyBusy, [subsystem]: true };
-		try {
-			await action();
-			notifications.success(okMessage);
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : failMessage);
-		} finally {
-			proxyBusy = { ...proxyBusy, [subsystem]: false };
-			await proxyInstallStatus[subsystem].refetch();
-		}
-	}
-
-	const proxyBinaryRows = $derived(
-		PROXY_SUBSYSTEMS.map(({ key, label }) => {
-			const st = proxyStatuses[key];
-			return {
-				key,
-				label,
-				present: st?.binariesPresent === true,
-				installAvailable: st?.installAvailable === true,
-				updateAvailable: st?.updateAvailable === true,
-				installedVersion: st?.installedVersion,
-				installVersion: st?.installVersion,
-				instances: st?.instances ?? 0,
-				busy: proxyBusy[key] === true,
-				oninstall: () =>
-					void runProxyBinaries(key, () => api.proxyInstall(key),
-						m.settings_page_proxy_installed({ label }), m.settings_page_proxy_install_failed({ label })),
-				onuninstall: () =>
-					void runProxyBinaries(key, () => api.proxyUninstall(key),
-						m.settings_page_proxy_removed({ label }), m.settings_page_proxy_remove_failed({ label })),
-			};
-		// Подсистема без статуса и без возможности установки — не наша арка:
-		// строка была бы мёртвой.
-		}).filter((row) => row.present || row.installAvailable),
-	);
 
 onMount(() => {
 	// Свой таймер мимо стора sysInfo. Данные тут почти статичные: версии,
@@ -454,217 +220,90 @@ $effect(() => {
 	}
 });
 
-	async function toggleAuth(enabled: boolean) {
+	function toggleAuth(enabled: boolean) {
+		return save(
+			() => api.updateSettings({ authEnabled: enabled }),
+			enabled ? m.settings_page_auth_enabled() : m.settings_page_auth_disabled(),
+			m.settings_page_save_error(),
+		);
+	}
+
+	function saveSessionTtl(hours: number) {
+		// 400 с русским сообщением от бэкенда (валидация 1..720) — показываем как есть.
+		return save(
+			() => api.updateSettings({ sessionTtlHours: hours }),
+			m.settings_page_session_ttl_saved(),
+			m.settings_page_save_error(),
+			true,
+		);
+	}
+
+	function toggleMcp(enabled: boolean) {
+		return save(
+			() => api.updateSettings({ mcpEnabled: enabled }),
+			enabled ? m.settings_page_mcp_enabled() : m.settings_page_mcp_disabled(),
+			m.settings_page_save_error(),
+			true,
+		);
+	}
+
+	function toggleObfuscatorRelay(process: boolean) {
+		return save(
+			() => api.setObfuscatorRelay(process),
+			process ? m.settings_page_phobos_userspace() : m.settings_page_phobos_kernel(),
+			m.settings_page_save_error(),
+			true,
+		);
+	}
+
+	function generateApiKey() {
+		// Server-side generation: WebCrypto's randomUUID is unavailable
+		// over plain HTTP (router LAN context), so the backend produces
+		// the UUID via crypto/rand and persists it in one round-trip.
+		return save(() => api.regenerateApiKey(), m.settings_page_apikey_generated(), m.settings_page_apikey_generate_failed());
+	}
+
+	function toggleLogging(enabled: boolean) {
+		return save(
+			() => api.updateSettings({ logging: { enabled } }),
+			enabled ? m.settings_page_logging_enabled() : m.settings_page_logging_disabled(),
+			m.settings_page_save_error(),
+		);
+	}
+
+	function saveLoggingSettings(logging: Settings["logging"]) {
+		return save(() => api.updateSettings({ logging }), m.settings_page_logging_saved(), m.settings_page_save_error());
+	}
+
+	function toggleDnsAutoRefresh(enabled: boolean) {
 		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ authEnabled: enabled });
-			setGlobalSettings(settings);
-			notifications.success(enabled ? m.settings_page_auth_enabled() : m.settings_page_auth_disabled());
-		} catch {
-			notifications.error(m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
+		const current = settings.dnsRoute;
+		return save(
+			() =>
+				api.updateSettings({
+					dnsRoute: {
+						autoRefreshEnabled: enabled,
+						// Дефолты дописываем, только если их нет: остальное блока не трогаем.
+						...(enabled && current.refreshIntervalHours === 0 ? { refreshIntervalHours: 6 } : {}),
+						...(current.refreshMode ? {} : { refreshMode: "interval" as const }),
+					},
+				}),
+			enabled ? m.settings_page_dns_auto_enabled() : m.settings_page_dns_auto_disabled(),
+			m.settings_page_save_error(),
+		);
 	}
 
-	// «Время жизни сессии» — local state + changed-derived + save button
-	// (same pattern as DnsRouteSettings). Legacy backends omit the field →
-	// fall back to 24 h.
-	let sessionTtlLocal = $state<number | null>(SESSION_TTL_DEFAULT_HOURS);
-	const savedSessionTtl = $derived(clampSessionTtlHours(settings?.sessionTtlHours));
-	const sessionTtlChanged = $derived(sessionTtlLocal !== savedSessionTtl);
-
-	$effect(() => {
-		sessionTtlLocal = savedSessionTtl;
-	});
-
-	async function saveSessionTtl() {
-		if (!settings) return;
-		const hours = clampSessionTtlHours(sessionTtlLocal);
-		sessionTtlLocal = hours;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ sessionTtlHours: hours });
-			setGlobalSettings(settings);
-			notifications.success(m.settings_page_session_ttl_saved());
-		} catch (e) {
-			// 400 с русским сообщением от бэкенда (валидация 1..720) — показываем как есть.
-			notifications.error(e instanceof Error ? e.message : m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
+	function saveDnsRouteSettings(dnsRoute: Settings["dnsRoute"]) {
+		return save(() => api.updateSettings({ dnsRoute }), m.settings_page_dns_auto_saved(), m.settings_page_save_error());
 	}
 
-	// Ключи запрашиваются только пока MCP включён; SSE «mcpKeys» обновляет
-	// список через стор, поэтому после create/revoke руками ничего не грузим.
-	let mcpKeysState = $state<PollingState<McpKey[]> | null>(null);
-	$effect(() => {
-		if (!settings?.mcpEnabled) {
-			mcpKeysState = null;
-			return;
-		}
-		return mcpKeys.subscribe((s) => {
-			if (s.status === "error" && mcpKeysState?.status !== "error") {
-				notifications.error(s.error ?? m.settings_page_mcp_keys_load_failed());
-			}
-			mcpKeysState = s;
-		});
-	});
-
-	async function toggleMcp(enabled: boolean) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ mcpEnabled: enabled });
-			setGlobalSettings(settings);
-			notifications.success(enabled ? m.settings_page_mcp_enabled() : m.settings_page_mcp_disabled());
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function toggleObfuscatorRelay(process: boolean) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.setObfuscatorRelay(process);
-			setGlobalSettings(settings);
-			notifications.success(process ? m.settings_page_phobos_userspace() : m.settings_page_phobos_kernel());
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function createMcpKey(name: string, readOnly: boolean): Promise<McpKeyCreated> {
-		const created = await api.createMcpKey(name, readOnly);
-		await mcpKeys.refetch();
-		return created;
-	}
-
-	async function revokeMcpKey(id: string) {
-		try {
-			await api.revokeMcpKey(id);
-			notifications.success(m.settings_page_key_revoked());
-			await mcpKeys.refetch();
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_key_revoke_failed());
-		}
-	}
-
-	async function generateApiKey() {
-		if (!settings) return;
-		saving = true;
-		try {
-			// Server-side generation: WebCrypto's randomUUID is unavailable
-			// over plain HTTP (router LAN context), so the backend produces
-			// the UUID via crypto/rand and persists it in one round-trip.
-			settings = await api.regenerateApiKey();
-			setGlobalSettings(settings);
-			notifications.success(m.settings_page_apikey_generated());
-		} catch {
-			notifications.error(m.settings_page_apikey_generate_failed());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function copyApiKey() {
-		if (!settings) return;
-		const key = (settings.apiKey ?? "").trim();
-		if (!key) {
-			notifications.info(m.settings_page_apikey_generate_first());
-			return;
-		}
-		if (await copyToClipboard(key)) {
-			notifications.success(m.settings_page_apikey_copied());
-		} else {
-			notifications.error(m.settings_page_apikey_copy_failed());
-		}
-	}
-
-	async function toggleLogging(enabled: boolean) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ logging: { enabled } });
-			setGlobalSettings(settings);
-			notifications.success(enabled ? m.settings_page_logging_enabled() : m.settings_page_logging_disabled());
-		} catch {
-			notifications.error(m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function saveLoggingSettings(logging: Settings["logging"]) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ logging });
-			setGlobalSettings(settings);
-			notifications.success(m.settings_page_logging_saved());
-		} catch {
-			notifications.error(m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function toggleDnsAutoRefresh(enabled: boolean) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({
-				dnsRoute: {
-					autoRefreshEnabled: enabled,
-					// Дефолты дописываем, только если их нет: остальное блока не трогаем.
-					...(enabled && settings.dnsRoute.refreshIntervalHours === 0 ? { refreshIntervalHours: 6 } : {}),
-					...(settings.dnsRoute.refreshMode ? {} : { refreshMode: "interval" as const }),
-				},
-			});
-			setGlobalSettings(settings);
-			notifications.success(enabled ? m.settings_page_dns_auto_enabled() : m.settings_page_dns_auto_disabled());
-		} catch {
-			notifications.error(m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function saveDnsRouteSettings(dnsRoute: Settings["dnsRoute"]) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ dnsRoute });
-			setGlobalSettings(settings);
-			notifications.success(m.settings_page_dns_auto_saved());
-		} catch {
-			notifications.error(m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function savePingTargetsSettings() {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({
-				pingCheck: { defaults: { target: settings.pingCheck.defaults.target } },
-				connectivityCheckUrl: settings.connectivityCheckUrl,
-			});
-			setGlobalSettings(settings);
-			notifications.success(m.settings_page_ping_targets_saved());
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_ping_targets_save_failed());
-		} finally {
-			saving = false;
-		}
+	function savePingTargetsSettings(target: string, connectivityCheckUrl: string) {
+		return save(
+			() => api.updateSettings({ pingCheck: { defaults: { target } }, connectivityCheckUrl }),
+			m.settings_page_ping_targets_saved(),
+			m.settings_page_ping_targets_save_failed(),
+			true,
+		);
 	}
 
 	let savingBootstrapDNS = $state(false);
@@ -713,18 +352,12 @@ $effect(() => {
 		}
 	}
 
-	async function toggleUpdateCheck(enabled: boolean) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ updates: { checkEnabled: enabled } });
-			setGlobalSettings(settings);
-			notifications.success(enabled ? m.settings_page_update_check_enabled() : m.settings_page_update_check_disabled());
-		} catch {
-			notifications.error(m.settings_page_save_error());
-		} finally {
-			saving = false;
-		}
+	function toggleUpdateCheck(enabled: boolean) {
+		return save(
+			() => api.updateSettings({ updates: { checkEnabled: enabled } }),
+			enabled ? m.settings_page_update_check_enabled() : m.settings_page_update_check_disabled(),
+			m.settings_page_save_error(),
+		);
 	}
 
 	function requestChannel(channel: 'stable' | 'develop') {
@@ -761,99 +394,12 @@ $effect(() => {
 		await selectChannel('develop');
 	}
 
-	async function selectUsageLevel(level: UsageLevel) {
-		if (!settings) return;
-		saving = true;
-		try {
-			settings = await api.updateSettings({ usageLevel: level });
-			setGlobalSettings(settings);
-			notifications.success(m.settings_level_saved({ level: usageLevelLabel(level) }));
-		} catch {
-			notifications.error(m.settings_page_level_save_failed());
-		} finally {
-			saving = false;
-		}
-	}
-
-	async function restartDaemon() {
-		restartConfirmOpen = false;
-		restarting = true;
-		const before = await readBackendInstanceId().catch(() => null);
-		try {
-			const result = await requestDaemonRestart();
-			if (result === 'accepted') {
-				notifications.success(m.settings_page_restarting());
-			} else {
-				notifications.warning(m.settings_page_connection_dropped());
-			}
-			const waitResult = await waitForDaemonRestart(before);
-			if (waitResult === 'timeout') {
-				restarting = false;
-				notifications.warning(m.settings_page_restart_unconfirmed());
-				return;
-			}
-			location.reload();
-		} catch (e) {
-			notifications.error(e instanceof Error ? e.message : m.settings_page_restart_failed());
-			restarting = false;
-		}
-	}
-
-	async function requestDaemonRestart(): Promise<'accepted' | 'network-drop'> {
-		try {
-			const response = await fetch('/api/system/restart', {
-				method: 'POST',
-				credentials: 'same-origin',
-				cache: 'no-store',
-				headers: { 'Content-Type': 'application/json' },
-			});
-
-			if (response.status === 401) {
-				throw new Error(m.settings_page_session_expired());
-			}
-
-			if (!response.ok) {
-				const text = await response.text().catch(() => '');
-				throw new Error(m.settings_page_restart_http_failed({ status: response.status, text: text.substring(0, 120) }));
-			}
-
-			return 'accepted';
-		} catch (e) {
-			if (e instanceof TypeError) {
-				return 'network-drop';
-			}
-			throw e;
-		}
-	}
-
-	async function readBackendInstanceId(): Promise<string | null> {
-		const res = await fetch('/api/health', {
-			method: 'GET',
-			cache: 'no-store',
-			credentials: 'same-origin',
-		});
-		if (!res.ok) {
-			return null;
-		}
-		const body = await res.json().catch(() => null);
-		const id = body?.data?.instanceId;
-		return typeof id === 'string' && id.length > 0 ? id : null;
-	}
-
-	function sleep(ms: number) {
-		return new Promise<void>((resolve) => setTimeout(resolve, ms));
-	}
-
-	async function waitForDaemonRestart(previousInstanceId: string | null) {
-		return waitForBackendRestart({
-			previousInstanceId,
-			readInstanceId: readBackendInstanceId,
-			sleep,
-			now: () => Date.now(),
-			timeoutMs: 45_000,
-			pollMs: 750,
-			stableOnlineMs: 3_000,
-		});
+	function selectUsageLevel(level: UsageLevel) {
+		return save(
+			() => api.updateSettings({ usageLevel: level }),
+			m.settings_level_saved({ level: usageLevelLabel(level) }),
+			m.settings_page_level_save_failed(),
+		);
 	}
 
 	async function refreshSystemInfo() {
@@ -912,23 +458,9 @@ $effect(() => {
 					</div>
 				</div>
 
-				<IntegrationsCard
-					singboxStatus={singboxStatusValue}
-					{singboxStatusLoading}
-					hydraStatus={hydraStatusValue}
-					{hydraStatusLoading}
-					hydraStatusError={hydraStatusError}
-					{singboxInstalling}
-					{singboxUpdating}
-					{singboxInstallError}
-					{singboxUpdateError}
-					oninstallSingbox={installSingbox}
-					onupdateSingbox={updateSingbox}
-					onuninstallSingbox={uninstallSingbox}
-					{singboxUninstalling}
+				<IntegrationsSection
 					showSingbox={showSingboxIntegration}
 					showHydra={showHydraIntegration}
-					zapretStatus={zapretStatusValue}
 					bootstrapDNS={settings.singboxBootstrapDNS ?? ''}
 					bootstrapSaving={savingBootstrapDNS}
 					onsaveBootstrapDNS={saveBootstrapDNS}
@@ -936,7 +468,6 @@ $effect(() => {
 					clashPortSaving={savingClashPort}
 					{clashPortError}
 					onsaveClashPort={saveClashPort}
-					proxyBinaries={proxyBinaryRows}
 				/>
 				</div>
 			</aside>
@@ -954,49 +485,13 @@ $effect(() => {
 				<ThemeSchemeCard />
 			{/if}
 
-				<div class="settings-block">
-					<div class="card">
-					<SettingsSectionLabel label={m.settings_page_access_title()} icon={Lock} tone="blue" header />
-					<div class="setting-row toggle-inline-row">
-						<div class="flex flex-col gap-1">
-							<span class="font-medium">{m.settings_page_auth_label()}</span>
-							<span class="setting-description">
-								{m.settings_page_auth_description()}
-							</span>
-						</div>
-						<Toggle checked={settings.authEnabled} controlled onchange={toggleAuth} disabled={saving} />
-					</div>
-					{#if settings.authEnabled}
-						<div class="setting-row session-ttl-row">
-							<div class="flex flex-col gap-1">
-								<span class="font-medium">{m.settings_page_session_ttl_label()}</span>
-								<span class="setting-description">
-									{m.settings_page_session_ttl_description()}
-								</span>
-							</div>
-							<div class="session-ttl-form">
-								<div class="input-with-suffix">
-									<input
-										type="number"
-										id="sessionTtlHours"
-										bind:value={sessionTtlLocal}
-										min={SESSION_TTL_MIN_HOURS}
-										max={SESSION_TTL_MAX_HOURS}
-										disabled={saving}
-									/>
-									<span class="input-suffix">{m.settings_page_hours_suffix()}</span>
-								</div>
-								{#if sessionTtlChanged}
-									<Button variant="primary" size="sm" onclick={saveSessionTtl} loading={saving}>
-										{saving ? m.common_saving() : m.common_save()}
-									</Button>
-								{/if}
-							</div>
-						</div>
-					{/if}
-					<HttpServerCard />
-					</div>
-				</div>
+				<AccessCard
+					authEnabled={settings.authEnabled}
+					sessionTtlHours={settings.sessionTtlHours}
+					{saving}
+					ontoggleAuth={toggleAuth}
+					onsaveSessionTtl={saveSessionTtl}
+				/>
 
 				<div class="settings-block">
 					<div class="card">
@@ -1070,151 +565,28 @@ $effect(() => {
 				</div>
 
 				{#if $usageLevel === "expert"}
-				<div class="settings-block">
-					<div class="card">
-					<SettingsSectionLabel label={m.settings_page_ping_title()} icon={Activity} tone="teal" header />
-					<div class="setting-row ping-target-setting">
-						<div class="flex flex-col gap-1">
-							<span class="font-medium">{m.settings_page_ping_targets_label()}</span>
-							<span class="setting-description">
-								{m.settings_page_ping_targets_description()}
-							</span>
-						</div>
-						<div class="ping-target-controls">
-							<label class="ping-target-field">
-								<span>ICMP target</span>
-								<input
-									type="text"
-									class="settings-text-input"
-									bind:value={settings.pingCheck.defaults.target}
-									placeholder={defaultPingTarget}
-									disabled={saving}
-								/>
-							</label>
-							<label class="ping-target-field">
-								<span>{m.settings_page_ping_http_url()}</span>
-								<input
-									type="url"
-									class="settings-text-input"
-									bind:value={settings.connectivityCheckUrl}
-									placeholder={defaultConnectivityCheckUrl}
-									disabled={saving}
-								/>
-							</label>
-							<div class="ping-target-action">
-								<Button variant="secondary" size="md" onclick={savePingTargetsSettings} disabled={saving}>
-									{m.common_save()}
-								</Button>
-							</div>
-						</div>
-					</div>
-					</div>
-				</div>
+				<PingTargetsCard
+					target={settings.pingCheck.defaults.target}
+					url={settings.connectivityCheckUrl}
+					{saving}
+					onsave={savePingTargetsSettings}
+				/>
 
-				<div class="settings-block">
-					<div
-						id="feedback-fab"
-						class="card settings-highlight-target"
-						class:highlighted={highlightFeedbackFab}
-					>
-					<SettingsSectionLabel label={m.settings_page_advanced_title()} icon={Wrench} tone="indigo" header />
-					<div class="setting-row api-key-setting">
-						<div class="flex flex-col gap-1">
-							<span class="font-medium">API Key</span>
-							<span class="setting-description">
-								<RichText
-									text={m.settings_page_apikey_description({
-										endpoint: `${origin}/api/`,
-										token: m.settings_page_apikey_token(),
-									})}
-								/>
-							</span>
-						</div>
-						<div class="api-key-controls">
-							<input
-								type="text"
-								class="api-key-input"
-								value={settings.apiKey ?? ""}
-								readonly
-								placeholder={m.settings_page_apikey_placeholder()}
-								onclick={copyApiKey}
-								title={settings.apiKey?.trim()
-									? m.settings_page_apikey_click_to_copy()
-									: m.settings_page_apikey_generate_hint()}
-							/>
-							<div class="api-key-action">
-								<Button variant="secondary" size="md" onclick={generateApiKey} disabled={saving}>
-									{m.common_generate()}
-								</Button>
-							</div>
-						</div>
-					</div>
-					{#if settings.updates.channel === 'develop'}
-					<div class="setting-row toggle-inline-row">
-						<div class="flex flex-col gap-1">
-							<span class="font-medium">{m.settings_page_feedback_label()}</span>
-							<span class="setting-description">
-								{m.settings_page_feedback_description()}
-							</span>
-						</div>
-						<Toggle
-							checked={$developFeedbackFabVisible}
-							onchange={(v) => developFeedbackFabVisible.set(v)}
-						/>
-					</div>
-					{/if}
+				<AdvancedCard
+					apiKey={settings.apiKey}
+					{origin}
+					{saving}
+					showFeedback={settings.updates.channel === 'develop'}
+					showNdmsProxy={singboxInstalled && showSingboxIntegration}
+					highlighted={highlightFeedbackFab}
+					ongenerateApiKey={generateApiKey}
+				/>
 
-					<div class="setting-row toggle-inline-row">
-						<div class="flex flex-col gap-1">
-							<span class="font-medium">{m.settings_page_happ_label()}</span>
-							<span class="setting-description">
-								{m.settings_page_happ_description()}
-							</span>
-						</div>
-						<Button
-							variant="secondary"
-							size="md"
-							onclick={() => (showHappKeysModal = true)}
-							disabled={saving}
-						>
-							{m.settings_page_happ_manage()}
-						</Button>
-					</div>
-
-					{#if singboxInstalled && showSingboxIntegration}
-						<div class="setting-row toggle-inline-row">
-							<div class="flex flex-col gap-1">
-								<span class="font-medium">{m.settings_page_ndms_proxy_label()}</span>
-								<span class="setting-description">
-									{#if ndmsProxyEnabled}
-										{m.settings_page_ndms_proxy_on_1()}
-										<br>
-										{m.settings_page_ndms_proxy_on_2()}
-									{:else}
-										{m.settings_page_ndms_proxy_off()}
-									{/if}
-								</span>
-							</div>
-							<Toggle
-								checked={ndmsProxyEnabled}
-								controlled
-								disabled={ndmsProxyBusy}
-								onchange={handleNDMSProxyToggleClick}
-							/>
-						</div>
-					{/if}
-					</div>
-				</div>
-
-				<McpCard
+				<McpSection
 					enabled={settings.mcpEnabled ?? false}
 					{saving}
-					keys={mcpKeysState?.data ?? []}
-					keysLoading={mcpKeysState?.status === "loading"}
 					{origin}
 					ontoggle={toggleMcp}
-					oncreate={createMcpKey}
-					onrevoke={revokeMcpKey}
 				/>
 
 				<ObfuscatorRelayCard
@@ -1235,92 +607,10 @@ $effect(() => {
 			</main>
 		</div>
 
-		<div class="settings-block" id="settings-actions">
-			<div class="card actions-card">
-			<SettingsSectionLabel label={m.settings_page_actions_title()} icon={Power} tone="red" header />
-			<div class="setting-row">
-				<div class="flex flex-col gap-1">
-					<span class="font-medium">{m.settings_page_restart_label()}</span>
-					<span class="setting-description">{m.settings_page_restart_description()}</span>
-				</div>
-				<Button
-					variant="secondary"
-					size="sm"
-					onclick={() => (restartConfirmOpen = true)}
-					loading={restarting}
-				>
-					{restarting ? m.settings_page_restarting_button() : m.common_restart()}
-				</Button>
-			</div>
-
-			{#if singboxInstalled && showSingboxIntegration}
-				<div class="setting-row">
-					<div class="flex flex-col gap-1">
-						<span class="font-medium">Sing-box</span>
-						<span class="setting-description">
-							{singboxRunning ? m.settings_page_process_running() : m.settings_page_process_stopped()}
-						</span>
-					</div>
-					<div class="action-buttons">
-						{#if singboxRunning}
-							<span title={singboxStatusValue?.updateAvailable ? m.settings_page_singbox_update_first({ version: singboxStatusValue.requiredVersion }) : ''}>
-								<Button
-									variant="secondary"
-									size="sm"
-									onclick={() => controlSingbox('restart')}
-									loading={singboxBusy}
-									disabled={singboxStatusValue?.updateAvailable ?? false}
-								>
-									{m.common_restart()}
-								</Button>
-							</span>
-							<Button variant="danger" size="sm" onclick={() => controlSingbox('stop')} loading={singboxBusy}>{m.common_stop()}</Button>
-						{:else}
-							<Button variant="success" size="sm" onclick={() => controlSingbox('start')} loading={singboxBusy}>{m.common_start()}</Button>
-						{/if}
-					</div>
-				</div>
-			{/if}
-
-			{#if hydraInstalled && showHydraIntegration}
-				<div class="setting-row">
-					<div class="flex flex-col gap-1">
-						<span class="font-medium">HydraRoute Neo</span>
-						<span class="setting-description">
-							{hydraRunning ? m.settings_page_daemon_running() : m.settings_page_daemon_stopped()}
-						</span>
-					</div>
-					<div class="action-buttons">
-						{#if hydraRunning}
-							<Button variant="secondary" size="sm" onclick={() => controlHydra('restart')} loading={hydraBusy}>{m.common_restart()}</Button>
-							<Button variant="danger" size="sm" onclick={() => controlHydra('stop')} loading={hydraBusy}>{m.common_stop()}</Button>
-						{:else}
-							<Button variant="success" size="sm" onclick={() => controlHydra('start')} loading={hydraBusy}>{m.common_start()}</Button>
-						{/if}
-					</div>
-				</div>
-			{/if}
-
-			{#if zapretInstalled}
-				<div class="setting-row">
-					<div class="flex flex-col gap-1">
-						<span class="font-medium">Zapret</span>
-						<span class="setting-description">
-							{zapretRunning ? m.settings_page_daemon_running() : m.settings_page_daemon_stopped()}
-						</span>
-					</div>
-					<div class="action-buttons">
-						{#if zapretRunning}
-							<Button variant="secondary" size="sm" onclick={() => controlZapret('restart')} loading={zapretBusy}>{m.common_restart()}</Button>
-							<Button variant="danger" size="sm" onclick={() => controlZapret('stop')} loading={zapretBusy}>{m.common_stop()}</Button>
-						{:else}
-							<Button variant="success" size="sm" onclick={() => controlZapret('start')} loading={zapretBusy}>{m.common_start()}</Button>
-						{/if}
-					</div>
-				</div>
-			{/if}
-			</div>
-		</div>
+		<ServiceActionsCard
+			showSingbox={showSingboxIntegration}
+			showHydra={showHydraIntegration}
+		/>
 
 		<div class="settings-doc-block" id="settings-footer-block">
 			<div class="settings-footer-patrol-host" bind:clientWidth={footerPatrolWidth}>
@@ -1338,41 +628,7 @@ $effect(() => {
 		onpassed={confirmDevelopChannel}
 	/>
 
-	<ConfirmModal
-		open={ndmsProxyConfirmOpen}
-		title={ndmsProxyConfirmEnable ? m.settings_page_ndms_confirm_enable_title() : m.settings_page_ndms_confirm_disable_title()}
-		message={ndmsProxyConfirmEnable
-			? m.settings_page_ndms_confirm_enable_message()
-			: m.settings_page_ndms_confirm_disable_message()}
-		secondary={ndmsProxyConfirmEnable
-			? m.settings_page_ndms_confirm_enable_secondary()
-			: m.settings_page_ndms_confirm_disable_secondary()}
-		confirmLabel={ndmsProxyConfirmEnable ? m.common_enable() : m.common_disable()}
-		variant={ndmsProxyConfirmEnable ? 'primary' : 'danger'}
-		busy={ndmsProxyBusy}
-		onConfirm={applyNDMSProxyToggle}
-		onClose={() => (ndmsProxyConfirmOpen = false)}
-	/>
 
-	<Modal
-		open={restartConfirmOpen}
-		title={m.settings_page_restart_modal_title()}
-		size="sm"
-		onclose={() => (restartConfirmOpen = false)}
-	>
-		<p class="modal-text">
-			{m.settings_page_restart_modal_text()}
-		</p>
-		{#snippet actions()}
-			<Button variant="ghost" size="md" onclick={() => (restartConfirmOpen = false)}>{m.common_cancel()}</Button>
-			<Button variant="primary" size="md" onclick={restartDaemon}>{m.common_restart()}</Button>
-		{/snippet}
-	</Modal>
-
-	<HappKeysModal
-		bind:open={showHappKeysModal}
-		onclose={() => (showHappKeysModal = false)}
-	/>
 </PageContainer>
 
 <style>
@@ -1409,277 +665,13 @@ $effect(() => {
 		width: 100%;
 	}
 
-	.modal-text {
-		color: var(--color-text-secondary);
-		font-size: 0.875rem;
-		margin: 0;
-	}
-
 	.settings-footer-patrol-host {
 		position: relative;
 		overflow: visible;
 	}
 
-	.actions-card > .setting-row {
-		align-items: center;
-	}
-
-	.action-buttons {
-		display: inline-flex;
-		gap: 0.375rem;
-		flex-shrink: 0;
-		align-items: center;
-		justify-content: flex-end;
-	}
-
-	@media (min-width: 641px) {
-		.actions-card > .setting-row > :global(.btn),
-		.action-buttons :global(.btn) {
-			width: 7.5rem;
-			min-width: 7.5rem;
-		}
-
-		.action-buttons > span {
-			display: inline-flex;
-		}
-
-		.action-buttons > span :global(.btn) {
-			width: 7.5rem;
-			min-width: 7.5rem;
-		}
-	}
-
-	.api-key-controls {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: stretch;
-		gap: 0.5rem;
-		width: 100%;
-		min-width: 0;
-	}
-
-	/* «Время жизни сессии» — inline number input + save button (по образцу DnsRouteSettings) */
-	.session-ttl-form {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.5rem;
-		flex-shrink: 0;
-		min-width: 0;
-	}
-
-	.input-with-suffix {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.35rem;
-		min-width: 0;
-	}
-
-	.input-suffix {
-		font-size: 0.8125rem;
-		color: var(--text-secondary);
-	}
-
-	.session-ttl-form input[type="number"] {
-		width: 4.75rem;
-	}
 
 	@media (max-width: 640px) {
-		.session-ttl-row {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: center;
-			gap: 0.75rem;
-		}
-
-		.session-ttl-form {
-			flex-wrap: wrap;
-			justify-content: flex-end;
-		}
-	}
-
-	.ping-target-setting {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr);
-		gap: 0.65rem;
-		align-items: start;
-	}
-
-	.ping-target-controls {
-		display: grid;
-		grid-template-columns: minmax(8rem, 0.78fr) minmax(16rem, 1.22fr) 7.5rem;
-		gap: 0.5rem 0.625rem;
-		width: 100%;
-		min-width: 0;
-		align-items: end;
-	}
-
-	.ping-target-field {
-		display: grid;
-		gap: 0.25rem;
-		min-width: 0;
-	}
-
-	.ping-target-field > span {
-		color: var(--color-text-secondary);
-		font-size: 0.75rem;
-		font-weight: 600;
-	}
-
-	.ping-target-field input {
-		min-width: 0;
-	}
-
-	.settings-text-input {
-		width: 100%;
-		max-width: none;
-	}
-
-	.ping-target-action {
-		display: flex;
-		align-items: stretch;
-		justify-content: stretch;
-		align-self: end;
-		min-width: 0;
-	}
-
-	.ping-target-action :global(.btn) {
-		width: 100%;
-		min-width: 7.5rem;
-		height: 32px;
-		min-height: 32px;
-		max-height: 32px;
-		box-sizing: border-box;
-		padding-block: 0;
-	}
-
-	.api-key-input {
-		cursor: pointer;
-	}
-
-	.api-key-action {
-		display: flex;
-		align-items: stretch;
-		white-space: nowrap;
-	}
-
-	.api-key-action :global(.btn) {
-		height: 32px;
-		min-height: 32px;
-		max-height: 32px;
-		box-sizing: border-box;
-		padding-block: 0;
-	}
-
-	.api-key-setting {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(0, min(50%, 34rem));
-		gap: 1rem;
-		align-items: center;
-	}
-	.api-key-setting > *:first-child {
-		min-width: 0;
-	}
-
-	@media (min-width: 641px) {
-		.ping-target-setting > *:first-child {
-			display: flex;
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 0.25rem;
-		}
-
-		.ping-target-setting .setting-description {
-			white-space: normal;
-			overflow: visible;
-			text-overflow: clip;
-		}
-
-		.ping-target-controls {
-			grid-template-rows: auto 32px;
-			align-items: stretch;
-		}
-
-		.ping-target-field {
-			display: contents;
-		}
-
-		.ping-target-field > span {
-			grid-row: 1;
-		}
-
-		.ping-target-field > input {
-			grid-row: 2;
-		}
-
-		.ping-target-action {
-			grid-row: 2;
-			align-self: stretch;
-		}
-
-		.api-key-setting {
-			grid-template-columns: minmax(0, 1fr) minmax(0, min(50%, 34rem));
-			align-items: center;
-		}
-
-		.api-key-setting > *:first-child {
-			display: flex;
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 0.25rem;
-		}
-
-		.api-key-setting .setting-description {
-			white-space: normal;
-			overflow: visible;
-			text-overflow: clip;
-		}
-
-		.api-key-controls {
-			width: 100%;
-			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: stretch;
-		}
-
-		.api-key-action {
-			display: flex;
-		}
-
-		.api-key-action :global(.btn) {
-			width: auto;
-			min-width: 7.5rem;
-			height: 32px;
-			min-height: 32px;
-			max-height: 32px;
-		}
-	}
-
-	@media (max-width: 640px) {
-		.ping-target-setting {
-			grid-template-columns: 1fr;
-			align-items: stretch;
-		}
-
-		.ping-target-controls {
-			grid-template-columns: minmax(0, 1fr);
-		}
-
-		.ping-target-action {
-			justify-content: stretch;
-		}
-
-		.ping-target-action :global(.btn) {
-			width: 100%;
-		}
-
-		.api-key-controls {
-			grid-template-columns: minmax(0, 1fr) auto;
-		}
-
-		.api-key-setting {
-			grid-template-columns: 1fr;
-		}
-
 		.toggle-inline-row {
 			flex-direction: row;
 			align-items: center;
@@ -1692,56 +684,6 @@ $effect(() => {
 			min-width: 0;
 		}
 
-		.actions-card > .setting-row:has(.action-buttons) {
-			flex-direction: column;
-			align-items: stretch;
-			flex-wrap: nowrap;
-			gap: 0.625rem;
-		}
-
-		.actions-card > .setting-row:has(.action-buttons) > *:first-child {
-			flex: initial;
-			width: 100%;
-		}
-
-		.actions-card > .setting-row {
-			flex-direction: row;
-			align-items: center;
-			flex-wrap: nowrap;
-			gap: 0.75rem;
-		}
-
-		.actions-card > .setting-row > *:first-child {
-			flex: 1 1 auto;
-			min-width: 0;
-		}
-
-		.action-buttons {
-			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			justify-content: stretch;
-			flex-wrap: nowrap;
-			width: 100%;
-			gap: 0.5rem;
-		}
-
-		.actions-card > .setting-row > :global(.btn) {
-			width: min(50%, 10rem);
-			min-width: 0;
-			margin-left: auto;
-		}
-
-		.action-buttons > span {
-			display: block;
-			width: 100%;
-			min-width: 0;
-		}
-
-		.action-buttons > span :global(.btn),
-		.action-buttons :global(.btn) {
-			width: 100%;
-			min-width: 0;
-		}
 	}
 
 	@media (max-width: 900px) {
@@ -1751,19 +693,5 @@ $effect(() => {
 		.settings-left-sticky {
 			position: static;
 		}
-	}
-
-	.settings-highlight-target.highlighted {
-		animation: settings-target-glow 2.8s ease-out forwards;
-	}
-
-	@keyframes settings-target-glow {
-		0%   { box-shadow: none; }
-		12%  { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 55%, transparent), 0 0 18px 2px color-mix(in srgb, var(--color-accent) 22%, transparent); }
-		30%  { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent); }
-		48%  { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 40%, transparent), 0 0 14px 2px color-mix(in srgb, var(--color-accent) 15%, transparent); }
-		65%  { box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 15%, transparent); }
-		82%  { box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 22%, transparent), 0 0 8px 1px color-mix(in srgb, var(--color-accent) 10%, transparent); }
-		100% { box-shadow: none; }
 	}
 </style>
