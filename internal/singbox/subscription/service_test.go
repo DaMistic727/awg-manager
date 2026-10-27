@@ -1876,7 +1876,7 @@ func TestCreate_ExcludedKeys(t *testing.T) {
 	if len(parsed.Outbounds) != 1 {
 		t.Fatalf("want 1 parsed outbound, got %d (errors=%v)", len(parsed.Outbounds), parsed.Errors)
 	}
-	keyB := IdentityHash(parsed.Outbounds[0])
+	keyB := suffixOf(keysOf(parsed.Outbounds[0]).narrow)
 	sub, err := svc.Create(context.Background(), CreateInput{Label: "x", Inline: links, ExcludedKeys: []string{keyB}})
 	if err != nil {
 		t.Fatal(err)
@@ -1947,6 +1947,48 @@ func TestAddManualMember_ExactRepeatRejected(t *testing.T) {
 		"vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=a.sni#dup")
 	if !errors.Is(err, ErrMemberDuplicate) {
 		t.Fatalf("exact repeat must be ErrMemberDuplicate, got %v", err)
+	}
+}
+
+// Другая учётка на том же адресе — не повтор: при общем пароле naive-логины
+// различаются только username, у vless — только uuid (F734).
+func TestAddManualMember_OtherAccountOnSameEndpoint(t *testing.T) {
+	for _, tc := range []struct{ seed, other string }{
+		{"naive+https://alice:shared@h.example:443#A", "naive+https://bob:shared@h.example:443#B"},
+		{"vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=a.sni#A",
+			"vless://3a3b1c2e-9999-4321-aaaa-1234567890cd@h.example:443?security=tls&sni=a.sni#B"},
+	} {
+		svc, _ := newTestService(t)
+		sub, err := svc.Create(context.Background(), CreateInput{Label: "manual", Inline: tc.seed, Enabled: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated, err := svc.AddManualMember(context.Background(), sub.ID, tc.other)
+		if err != nil {
+			t.Fatalf("%s: other account must add, got %v", tc.other, err)
+		}
+		if len(updated.MemberTags) != 2 {
+			t.Fatalf("%s: MemberTags=%d want 2", tc.other, len(updated.MemberTags))
+		}
+		// Повтор засеянной записи: её тег узкий, у повтора — широкий, так что
+		// поймать его может только сравнение тел, а не совпадение тегов.
+		if _, err := svc.AddManualMember(context.Background(), sub.ID, tc.seed); !errors.Is(err, ErrMemberDuplicate) {
+			t.Fatalf("%s: repeat must be ErrMemberDuplicate, got %v", tc.seed, err)
+		}
+	}
+}
+
+// Члена без тела в слоте (сброшен flush'ем) повтор ловится по метаданным.
+func TestAddManualMember_RepeatOfMemberWithoutBody(t *testing.T) {
+	svc, mut := newTestService(t)
+	link := "vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=a.sni#A"
+	sub, err := svc.Create(context.Background(), CreateInput{Label: "manual", Inline: link, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mut.bodies = nil
+	if _, err := svc.AddManualMember(context.Background(), sub.ID, link); !errors.Is(err, ErrMemberDuplicate) {
+		t.Fatalf("repeat must be ErrMemberDuplicate, got %v", err)
 	}
 }
 

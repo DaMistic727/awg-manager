@@ -1436,10 +1436,10 @@ const (
 // the supplied share-link into exactly one outbound.
 var ErrShareLinkInvalid = errors.New("subscription: share-link did not parse to a single outbound")
 
-// ErrMemberDuplicate is returned when AddManualMember would create a
-// member with a tag that already exists for this subscription. Tags are
-// derived from the server identity (StableTag), so the same vless://
-// twice produces the same tag.
+// ErrMemberDuplicate is returned when AddManualMember is given a server the
+// subscription already has: same outbound body by the widest identity key
+// (credentials included), or, for a member without a body in the config
+// slot, the same metadata.
 var ErrMemberDuplicate = errors.New("subscription: member already exists")
 
 // ErrMemberNotFound is returned by RemoveMember when the supplied tag
@@ -1447,9 +1447,8 @@ var ErrMemberDuplicate = errors.New("subscription: member already exists")
 var ErrMemberNotFound = errors.New("subscription: member not found")
 
 // AddManualMember parses a single share-link, validates it, and adds it
-// to an inline subscription as a new member. Re-uses the same StableTag
-// derivation as the URL refresh path so adding the same server twice
-// short-circuits with ErrMemberDuplicate.
+// to an inline subscription as a new member. Adding a server the
+// subscription already has short-circuits with ErrMemberDuplicate.
 //
 // On selector-mode subs the new member becomes available for picking;
 // on urltest-mode subs it joins the auto-test pool. Active member is
@@ -1497,21 +1496,31 @@ func (s *Service) AddManualMember(ctx context.Context, id, shareLink string) (*S
 		return updated, nil
 	}
 	out := parts.Valid[0]
-	// Набор для chooseKeys недоступен (credential существующих членов не
-	// хранится), поэтому тег считаем по полному ключу: два эндпоинта одного
-	// сервера, различающиеся
-	// только транспортом, обязаны получить РАЗНЫЕ теги, иначе второй outbound
-	// перезаписал бы первый (issue #625).
+	// Набор для chooseKeys недоступен, поэтому тег считаем по самому широкому
+	// ключу: два эндпоинта одного сервера, различающиеся только транспортом
+	// (issue #625) или только логином при общем пароле (F734), обязаны
+	// получить РАЗНЫЕ теги, иначе второй outbound перезаписал бы первый.
 	//
-	// Повтор по-прежнему ловим по метаданным: точного ключа существующих
-	// членов взять неоткуда (мутатор не отдаёт тела outbound'ов), а их теги
-	// могли быть посчитаны на любом уровне ключа. TransportKey закрывает ту
-	// дыру, из-за которой разные ws-пути считались одним сервером; у записей,
-	// сделанных до появления поля, он пуст — для них остаётся прежнее грубое
-	// сравнение, иначе точный повтор проскочил бы под тем же тегом.
-	tag := stableTagFromKey(sub.ID, fullKey(out))
+	// Повтор ловим по телам существующих членов из слота конфига — тем же
+	// широким ключом, с учётными данными. Их теги могли быть посчитаны на
+	// любом уровне ключа, поэтому сравниваются тела, а не теги. Члена без
+	// тела в слоте (сброшен flush'ем) сравниваем по метаданным, как раньше:
+	// TransportKey закрывает разные ws-пути, у записей до появления поля он
+	// пуст — для них грубое сравнение, иначе точный повтор проскочил бы.
+	keys := keysOf(out)
+	tag := stableTagFromKey(sub.ID, keys.cred)
 	mi := toMemberInfo(tag, out)
+	bodies := make(map[string]map[string]any)
+	for _, ob := range s.mutator.SubscriptionOutbounds() {
+		bodies[outboundTag(ob)] = ob
+	}
 	for _, existing := range sub.Members {
+		if ob, ok := bodies[existing.Tag]; ok {
+			if keysFromOutbound(existing.Protocol, existing.Server, existing.Port, ob).cred == keys.cred {
+				return nil, ErrMemberDuplicate
+			}
+			continue
+		}
 		if existing.Server != mi.Server || existing.Port != mi.Port ||
 			existing.Protocol != mi.Protocol || existing.SNI != mi.SNI {
 			continue

@@ -127,17 +127,17 @@ func TestExtendedKey_DistinguishesSNIAndShortID(t *testing.T) {
 	diffSNI := mkReality("h", 443, "io.ozone.ru", "01ab")
 	diffSID := mkReality("h", 443, "eh1.vk.ru", "02cd")
 
-	if extendedKey(base) != extendedKey(sameSNIsameSID) {
-		t.Error("identical (SNI,short_id) must yield identical extendedKey")
+	if keysOf(base).ext != keysOf(sameSNIsameSID).ext {
+		t.Error("identical (SNI,short_id) must yield identical ext key")
 	}
-	if extendedKey(base) == extendedKey(diffSNI) {
-		t.Error("different SNI must yield different extendedKey")
+	if keysOf(base).ext == keysOf(diffSNI).ext {
+		t.Error("different SNI must yield different ext key")
 	}
-	if extendedKey(base) == extendedKey(diffSID) {
-		t.Error("different short_id must yield different extendedKey")
+	if keysOf(base).ext == keysOf(diffSID).ext {
+		t.Error("different short_id must yield different ext key")
 	}
-	if identityKey(base) != identityKey(diffSNI) {
-		t.Error("narrow identityKey must ignore SNI")
+	if keysOf(base).narrow != keysOf(diffSNI).narrow {
+		t.Error("narrow key must ignore SNI")
 	}
 }
 
@@ -179,13 +179,13 @@ func TestApplyDiff_NoCollisionUsesNarrowTag(t *testing.T) {
 	}
 }
 
-func TestIdentityHash_SubIDIndependent(t *testing.T) {
+func TestStableTag_SuffixSubIDIndependent(t *testing.T) {
 	p := vlink.ParsedOutbound{Protocol: "vless", Server: "a.example", Port: 443, Outbound: []byte(`{"uuid":"u1"}`)}
-	h := IdentityHash(p)
+	h := suffixOf(keysOf(p).narrow)
 	if len(h) != 8 {
 		t.Fatalf("want 8 hex chars, got %q", h)
 	}
-	// Полный тег для разных subID должен совпадать суффиксом = IdentityHash.
+	// Полный тег для разных subID должен совпадать суффиксом — ключом исключения.
 	t1 := StableTag("aaaaaaaa1111", p)
 	t2 := StableTag("bbbbbbbb2222", p)
 	if t1[len(t1)-8:] != h || t2[len(t2)-8:] != h {
@@ -278,7 +278,7 @@ func TestApplyDiff_TrueDuplicatesKeepNarrowTag(t *testing.T) {
 	if len(got.New) != 1 {
 		t.Fatalf("len(New) = %d, want 1", len(got.New))
 	}
-	if want := stableTagFromKey("sub", identityKey(p)); got.New[0].Tag != want {
+	if want := stableTagFromKey("sub", keysOf(p).narrow); got.New[0].Tag != want {
 		t.Errorf("tag = %q, want narrow-key tag %q", got.New[0].Tag, want)
 	}
 }
@@ -292,7 +292,7 @@ func TestApplyDiff_RealityOnlyKeepsExtendedTag(t *testing.T) {
 	if len(got.New) != 2 {
 		t.Fatalf("len(New) = %d, want 2", len(got.New))
 	}
-	if want := stableTagFromKey("sub", extendedKey(a)); got.New[0].Tag != want {
+	if want := stableTagFromKey("sub", keysOf(a).ext); got.New[0].Tag != want {
 		t.Errorf("tag = %q, want extended-key tag %q (masking alone must not widen further)", got.New[0].Tag, want)
 	}
 }
@@ -319,7 +319,7 @@ func TestApplyDiff_RealmIDDistinguishesMembers(t *testing.T) {
 	}
 	single := mkParsedRealm("a")
 	one := ApplyDiff("sub", nil, []vlink.ParsedOutbound{single})
-	if want := stableTagFromKey("sub", identityKey(single)); len(one.New) != 1 || one.New[0].Tag != want {
+	if want := stableTagFromKey("sub", keysOf(single).narrow); len(one.New) != 1 || one.New[0].Tag != want {
 		t.Errorf("одиночный realm-узел сменил тег")
 	}
 }
