@@ -286,34 +286,22 @@ func (s *Service) rciSetPrivateKey(ctx context.Context, iface query.Confirmed, p
 // Caller must pass JSON object shape accepted by NDMS and already stripped
 // from client-only signature fields (i1..i5).
 func (s *Service) rciSetASCParams(ctx context.Context, iface query.Confirmed, params json.RawMessage) error {
-	var asc map[string]any
-	if err := json.Unmarshal(params, &asc); err != nil {
-		return fmt.Errorf("parse ASC params: %w", err)
+	wg, err := s.peerCommands(iface)
+	if err != nil {
+		return err
 	}
-	return s.rciPost(ctx, map[string]interface{}{
-		"interface": map[string]interface{}{
-			iface.Name(): map[string]interface{}{
-				"wireguard": map[string]interface{}{
-					"asc": asc,
-				},
-			},
-		},
-	}, iface)
+	return s.rciLogged(wg.SetASCParams(ctx, iface, params))
 }
 
-// rciClearASCParams clears ASC settings from interface wireguard.asc.
+// rciClearASCParams снимает ASC с интерфейса — общей командой: структурную
+// форму {"asc":{"no":true}} 5.01.C.3 не принимал, строковая работает и там,
+// и на 5.02 (F527).
 func (s *Service) rciClearASCParams(ctx context.Context, iface query.Confirmed) error {
-	return s.rciPost(ctx, map[string]interface{}{
-		"interface": map[string]interface{}{
-			iface.Name(): map[string]interface{}{
-				"wireguard": map[string]interface{}{
-					"asc": map[string]interface{}{
-						"no": true,
-					},
-				},
-			},
-		},
-	}, iface)
+	wg, err := s.peerCommands(iface)
+	if err != nil {
+		return err
+	}
+	return s.rciLogged(wg.ResetASCParams(ctx, iface))
 }
 
 // rciSetHotspotPolicy applies an ip hotspot policy to the interface.
@@ -393,46 +381,44 @@ func (s *Service) rciSetUp(ctx context.Context, iface query.Confirmed, up bool) 
 
 // rciAddPeer adds a peer with all parameters in a single RCI call.
 func (s *Service) rciAddPeer(ctx context.Context, iface query.Confirmed, pubKey, psk, comment, peerIP string, enabled bool) error {
-	peer := map[string]interface{}{
-		"key":           pubKey,
-		"preshared-key": psk,
-		"connect":       enabled,
-		"allow-ips": []map[string]interface{}{
-			{"address": peerIP, "mask": "255.255.255.255"},
-		},
+	wg, err := s.peerCommands(iface)
+	if err != nil {
+		return err
 	}
-	if comment != "" {
-		peer["comment"] = comment
-	}
-	return s.rciPost(ctx, map[string]interface{}{
-		"interface": map[string]interface{}{
-			iface.Name(): map[string]interface{}{
-				"wireguard": map[string]interface{}{
-					"peer": []map[string]interface{}{peer},
-				},
-			},
-		},
-	}, iface)
+	return s.rciLogged(wg.AddPeer(ctx, iface, pubKey, psk, comment, peerIP, enabled))
 }
 
-// peerCommands — команды пира, общие с системным путём: снятие пира
-// («уже снят» — по свежему rc) и проверка наличия перед правкой по ключу
-// живут в одном месте, command.WireguardCommands.
-func (s *Service) peerCommands() (*command.WireguardCommands, error) {
+// peerCommands — команды пира и ASC, общие с системным путём: формы запросов
+// и допуски («уже снят» — по свежему rc) живут в одном месте,
+// command.WireguardCommands (F527).
+// Неподтверждённый интерфейс (Name()=="") — отказ без POST, как в rciPost.
+func (s *Service) peerCommands(iface query.Confirmed) (*command.WireguardCommands, error) {
+	if iface.Name() == "" {
+		return nil, fmt.Errorf("managed rci: команда без подтверждённого интерфейса")
+	}
 	if s.commands == nil || s.commands.Wireguard == nil {
 		return nil, fmt.Errorf("ndms commands not wired")
 	}
 	return s.commands.Wireguard, nil
 }
 
+// rciLogged пишет отказ общей команды в журнал, как rciPostTolerant — иначе
+// отказ роутера уходил только в ответ API и в журнале не оставался.
+func (s *Service) rciLogged(err error) error {
+	if err != nil {
+		s.sysLog().Warn("managed rci post failed", "error", err)
+	}
+	return err
+}
+
 // rciRemovePeer removes a peer by public key; пир, уже снятый мимо панели, —
 // успех (см. command.WireguardCommands.RemovePeer).
 func (s *Service) rciRemovePeer(ctx context.Context, iface query.Confirmed, pubKey string) error {
-	wg, err := s.peerCommands()
+	wg, err := s.peerCommands(iface)
 	if err != nil {
 		return err
 	}
-	return wg.RemovePeer(ctx, iface, pubKey)
+	return s.rciLogged(wg.RemovePeer(ctx, iface, pubKey))
 }
 
 // rciSetPeerConnect enables or disables a peer. comment must carry the peer's
@@ -440,21 +426,21 @@ func (s *Service) rciRemovePeer(ctx context.Context, iface query.Confirmed, pubK
 // comment (psk/allow-ips survive, comment does not). Пира на роутере нет —
 // peersubnet.ErrPeerNotFound без поста.
 func (s *Service) rciSetPeerConnect(ctx context.Context, iface query.Confirmed, pubKey string, connect bool, comment string) error {
-	wg, err := s.peerCommands()
+	wg, err := s.peerCommands(iface)
 	if err != nil {
 		return err
 	}
-	return wg.SetPeerConnect(ctx, iface, pubKey, connect, comment)
+	return s.rciLogged(wg.SetPeerConnect(ctx, iface, pubKey, connect, comment))
 }
 
 // rciSetPeerComment sets the description/comment for a peer. Пира на роутере
 // нет — peersubnet.ErrPeerNotFound без поста.
 func (s *Service) rciSetPeerComment(ctx context.Context, iface query.Confirmed, pubKey, comment string) error {
-	wg, err := s.peerCommands()
+	wg, err := s.peerCommands(iface)
 	if err != nil {
 		return err
 	}
-	return wg.SetPeerComment(ctx, iface, pubKey, comment)
+	return s.rciLogged(wg.SetPeerComment(ctx, iface, pubKey, comment))
 }
 
 // rciRemovePeerDefaultRoute strips the legacy 0.0.0.0/0 entry from a peer's
@@ -462,53 +448,19 @@ func (s *Service) rciSetPeerComment(ctx context.Context, iface query.Confirmed, 
 // sweep over peers created by older builds. `no such net in peer` — 0.0.0.0/0
 // у пира уже нет: цель миграции достигнута, а не отказ.
 func (s *Service) rciRemovePeerDefaultRoute(ctx context.Context, iface query.Confirmed, pubKey string) error {
-	return s.rciPostTolerant(ctx, map[string]interface{}{
-		"interface": map[string]interface{}{
-			iface.Name(): map[string]interface{}{
-				"wireguard": map[string]interface{}{
-					"peer": []map[string]interface{}{
-						{
-							"key": pubKey,
-							"allow-ips": []map[string]interface{}{
-								{"no": true, "address": "0.0.0.0", "mask": "0.0.0.0"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}, command.TolerateNoSuchNetInPeer, iface)
+	wg, err := s.peerCommands(iface)
+	if err != nil {
+		return err
+	}
+	return s.rciLogged(wg.RemovePeerAllowIP(ctx, iface, pubKey, "0.0.0.0", "0.0.0.0"))
 }
 
-// rciUpdatePeerAllowIPs removes old allow-ips and sets new ones. Снятие
-// старого идёт командой с допуском `no such net in peer` (11.A/11.8): /32 уже
-// может не стоять — после отказа отката или правки мимо панели, и такая смена
-// иначе застревала бы навсегда.
+// rciUpdatePeerAllowIPs removes old allow-ips and sets new ones (снятие
+// старого терпит `no such net in peer`, см. UpdatePeerAllowIPs).
 func (s *Service) rciUpdatePeerAllowIPs(ctx context.Context, iface query.Confirmed, pubKey, oldIP, newIP string) error {
-	if oldIP != "" {
-		if s.commands == nil || s.commands.Wireguard == nil {
-			return fmt.Errorf("ndms commands not wired")
-		}
-		if err := s.commands.Wireguard.RemovePeerAllowIP(ctx, iface, pubKey, oldIP, "255.255.255.255"); err != nil {
-			return fmt.Errorf("remove old allow-ips: %w", err)
-		}
+	wg, err := s.peerCommands(iface)
+	if err != nil {
+		return err
 	}
-
-	// Add new
-	return s.rciPost(ctx, map[string]interface{}{
-		"interface": map[string]interface{}{
-			iface.Name(): map[string]interface{}{
-				"wireguard": map[string]interface{}{
-					"peer": []map[string]interface{}{
-						{
-							"key": pubKey,
-							"allow-ips": []map[string]interface{}{
-								{"address": newIP, "mask": "255.255.255.255"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}, iface)
+	return s.rciLogged(wg.UpdatePeerAllowIPs(ctx, iface, pubKey, oldIP, newIP))
 }
