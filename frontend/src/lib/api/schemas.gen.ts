@@ -75,6 +75,7 @@ const api_AccessPoliciesListResponse: v.GenericSchema = v.looseObject({
 const api_AccessPolicyDTO: v.GenericSchema = v.looseObject({
 	description: v.optional(v.nullable(v.string())),
 	deviceCount: v.optional(v.nullable(v.number())),
+	held: v.optional(v.nullable(v.array(v.string()))),
 	interfaces: v.optional(v.nullable(v.array(v.lazy(() => api_AccessPolicyInterfaceDTO)))),
 	isStandard: v.optional(v.nullable(v.boolean())),
 	name: v.optional(v.nullable(v.string())),

@@ -3,7 +3,7 @@
 	import type { AccessPolicyInterface, PolicyGlobalInterface } from '$lib/types';
 	import { errorMessage } from '$lib/utils/errorMessage';
 	import { ConfirmModal, Badge, Button } from '$lib/components/ui';
-	import { Power, ChevronUp, ChevronDown, Check, Ban } from 'lucide-svelte';
+	import { Power, ChevronUp, ChevronDown, Check, Ban, TriangleAlert } from 'lucide-svelte';
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
 	import {
@@ -17,6 +17,8 @@
 		availableInterfaces: PolicyGlobalInterface[];
 		/** scroll: toggle + capped scroll. panel: toggle + full list без скролла (HR Neo, политики доступа). */
 		addPickerVariant?: 'scroll' | 'panel';
+		/** Интерфейсы, снятые мониторингом с политики до восстановления связи (F752). */
+		held?: string[];
 		onpermit: (iface: string, order: number) => void;
 		ondeny: (iface: string) => void;
 		onreorder: (iface: string, newOrder: number) => void;
@@ -27,6 +29,7 @@
 		interfaces: rawInterfaces,
 		availableInterfaces,
 		addPickerVariant = 'scroll',
+		held = [],
 		onpermit,
 		ondeny,
 		onreorder,
@@ -42,8 +45,10 @@
 
 	let catalog = $derived(filterPolicyGlobalInterfaces(availableInterfaces));
 
+	// Снятый мониторингом туннель не предлагаем добавить: монитор вернёт его сам
+	// на прежнюю позицию, ручной permit сломал бы порядок.
 	let unassigned = $derived(
-		catalog.filter((gi) => !interfaces.some((i) => i.name === gi.name)),
+		catalog.filter((gi) => !interfaces.some((i) => i.name === gi.name) && !held.includes(gi.name)),
 	);
 
 	let unassignedGroups = $derived(groupPolicyGlobalInterfaces(unassigned));
@@ -125,7 +130,7 @@
 		</div>
 	{/if}
 
-	{#if sorted.length === 0}
+	{#if sorted.length === 0 && held.length === 0}
 		<p class="empty-text">{m.access_policy_no_allowed_interfaces()}</p>
 	{:else}
 		<div class="iface-list">
@@ -175,6 +180,14 @@
 							{/if}
 						</button>
 					</div>
+				</div>
+			{/each}
+			{#each held as name (name)}
+				<div class="iface-row held">
+					<span class="iface-order">—</span>
+					<span class="led led-gray"></span>
+					<span class="iface-label" title={name}>{getLabel(name)}</span>
+					<span class="held-note"><TriangleAlert size={13} />{m.access_policy_held_by_monitoring()}</span>
 				</div>
 			{/each}
 		</div>
@@ -396,6 +409,29 @@
 
 	.iface-row.denied {
 		opacity: 0.5;
+	}
+
+	/* Пометка длинная: на узком экране уходит на вторую строку, а не сжимает
+	   имя туннеля в ноль. */
+	.iface-row.held {
+		flex-wrap: wrap;
+	}
+
+	.iface-row.held .iface-label {
+		min-width: 6em;
+		color: var(--text-muted);
+	}
+
+	.held-note {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 0.75rem;
+		color: var(--color-warning);
+	}
+
+	.held-note :global(svg) {
+		flex-shrink: 0;
 	}
 
 	.led {
