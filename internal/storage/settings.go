@@ -90,18 +90,10 @@ func (s *SettingsStore) Load() (*Settings, error) {
 		// Corrupt settings file (typically a torn write after power loss).
 		// Quarantine it and fall back to the backup kept by saveUnlocked so
 		// a single bad file does not leave the daemon permanently down.
-		quarantine := s.path + ".corrupt"
-		renamed := os.Rename(s.path, quarantine) == nil
-		if renamed {
-			// Карантинный файл — снимок настроек целиком, то есть он несёт те
-			// же секреты открытым текстом. Вычистить их нечем: файл на то и
-			// карантинный, что не разбирается. Остаётся закрыть права — он
-			// переживает перезагрузки и лежит до ручного разбора.
-			_ = os.Chmod(quarantine, SecretFilePermission)
-		}
+		quarantine, quarantineErr := quarantineFile(s.path)
 		where := "quarantined to " + quarantine
-		if !renamed {
-			where = "corrupt file left in place (rename to " + quarantine + " failed)"
+		if quarantineErr != nil {
+			where = fmt.Sprintf("corrupt file left in place (quarantine failed: %v)", quarantineErr)
 		}
 		bak, bakErr := os.ReadFile(s.path + ".bak")
 		if bakErr != nil {

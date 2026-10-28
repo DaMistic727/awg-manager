@@ -2,11 +2,37 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLoad_RepeatedCorruptionPreservesCopies(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	backup := []byte(fmt.Sprintf(`{"schemaVersion":%d,"usageLevel":"expert"}`, CurrentSchemaVersion))
+	if err := os.WriteFile(path+".bak", backup, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := os.WriteFile(path, []byte(fmt.Sprintf("{broken-%d", i)), 0644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := NewSettingsStore(dir).Load()
+		if err != nil || got.UsageLevel != "expert" {
+			t.Fatalf("backup restoration: %v, %v", got, err)
+		}
+		for j := 0; j <= i; j++ {
+			name := path + ".corrupt"
+			if j > 0 {
+				name += fmt.Sprintf(".%d", j)
+			}
+			assertQuarantine(t, name, fmt.Sprintf("{broken-%d", j))
+		}
+	}
+}
 
 // Битый settings.json карантинится в .corrupt, значения восстанавливаются из .bak
 // (hardlink, сделанный прошлой записью), уведомление backup-restore записано.
@@ -71,10 +97,10 @@ func TestLoad_RestoresFromBakWhenCorrupt(t *testing.T) {
 	}
 }
 
-// Отказ карантина (место .corrupt занято непустым каталогом — os.Rename файла поверх
-// него отказывает и под root) больше не выдаётся за «quarantined to»: битый файл
+// Отказ карантина (место .corrupt занято непустым каталогом) больше не выдаётся
+// за «quarantined to»: битый файл
 // остаётся на месте, восстановление из .bak всё равно идёт, уведомление говорит правду.
-func TestLoad_CorruptQuarantineRenameFailsIsReported(t *testing.T) {
+func TestLoad_CorruptQuarantineFailureIsReported(t *testing.T) {
 	dir := t.TempDir()
 	store := NewSettingsStore(dir)
 	if _, err := store.Load(); err != nil {
