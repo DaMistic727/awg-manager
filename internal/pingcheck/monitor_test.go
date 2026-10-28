@@ -11,6 +11,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/dnsroute"
 	"github.com/hoaxisr/awg-manager/internal/events"
 	"github.com/hoaxisr/awg-manager/internal/httpprobe"
+	"github.com/hoaxisr/awg-manager/internal/logging"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 	"github.com/hoaxisr/awg-manager/internal/sys/exec"
 	"github.com/hoaxisr/awg-manager/internal/sys/httpclient"
@@ -51,6 +52,7 @@ func TestSensorTick_WdttRawNeverTouchesInterface(t *testing.T) {
 	defer lb.Stop()
 	rec := stubRunCmd(t)
 	stubDeviceExists(t, true)
+	stubIfaceUp(t, true)
 	// Endpoint из записи пустой, поэтому команда лечения — только если резолв
 	// что-то вернёт; отдаём адрес, чтобы пропуск гарда был виден в rec.
 	stubResolveEndpoint(t, func(string) string { return "203.0.113.9:51820" })
@@ -150,6 +152,7 @@ func newKernelSensorService(t *testing.T) (*Service, *tunnelMonitor, *checkConfi
 	stopCh := make(chan struct{})
 	close(stopCh)
 	m := &tunnelMonitor{tunnelID: "awg7", tunnelName: "Нидерланды", stopCh: stopCh}
+	stubIfaceUp(t, true)
 	return s, m, config, stubRunCmd(t)
 }
 
@@ -284,6 +287,13 @@ func stubDeviceExists(t *testing.T, v bool) {
 	old := deviceExists
 	deviceExists = func(string) bool { return v }
 	t.Cleanup(func() { deviceExists = old })
+}
+
+func stubIfaceUp(t *testing.T, v bool) {
+	t.Helper()
+	old := ifaceUp
+	ifaceUp = func(string) bool { return v }
+	t.Cleanup(func() { ifaceUp = old })
 }
 
 // #855: провал до порога → лечение → проверка снова успешна. Туннель
@@ -475,5 +485,55 @@ func TestSensorTick_PublishesInvalidationOnEveryCheck(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("подсказок инвалидации пришло %d из 2: страница мониторинга замрёт", got)
 		}
+	}
+}
+
+// appLogRecorder — журнал приложения в памяти.
+type appLogRecorder struct{ msgs []string }
+
+func (r *appLogRecorder) AppLog(_ logging.Level, _, _, _, _, message string) {
+	r.msgs = append(r.msgs, message)
+}
+
+// Опущенный линк монитор не проверяет, но и не молчит: переход вниз и обратно
+// пишется в журнал ровно по разу, а не на каждом тике (ревью F750).
+func TestSensorTick_LinkTransitionsLoggedOnce(t *testing.T) {
+	orig := httpprobe.Client
+	t.Cleanup(func() { httpprobe.Client = orig })
+	httpprobe.Client = okDoer{}
+	s, m, config, _ := newKernelSensorService(t)
+	rec := &appLogRecorder{}
+	s.appLog = logging.NewScopedLogger(rec, "test", "pingcheck")
+
+	stubIfaceUp(t, false)
+	for range 3 {
+		s.sensorTick(m, config)
+	}
+	stubIfaceUp(t, true)
+	for range 2 {
+		s.sensorTick(m, config)
+	}
+	want := []string{"Link is down, checks paused until it is up", "Link is up, checks resumed"}
+	if !reflect.DeepEqual(rec.msgs, want) {
+		t.Fatalf("журнал = %q, want %q", rec.msgs, want)
+	}
+}
+
+// «Проверить сейчас» на опущенном линке отвечает строкой в журнале, а не
+// тишиной, и проверку не запускает.
+func TestCheckNow_LinkDownLogged(t *testing.T) {
+	s, m, config, _ := newKernelSensorService(t)
+	rec := &appLogRecorder{}
+	s.appLog = logging.NewScopedLogger(rec, "test", "pingcheck")
+	m.stopCh = make(chan struct{})
+	stubIfaceUp(t, false)
+
+	s.checkNowAsync(m, config)
+	m.wg.Wait()
+	if !reflect.DeepEqual(rec.msgs, []string{"Check skipped: link is down"}) {
+		t.Fatalf("журнал = %q", rec.msgs)
+	}
+	if len(s.logBuffer.GetAll()) != 0 {
+		t.Fatal("проверка опущенного линка попала в журнал мониторинга")
 	}
 }

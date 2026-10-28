@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/hoaxisr/awg-manager/internal/sys/httpclient"
+
 	"github.com/hoaxisr/awg-manager/internal/httpprobe"
 	"github.com/hoaxisr/awg-manager/internal/ndms"
 	"github.com/hoaxisr/awg-manager/internal/storage"
@@ -113,6 +115,71 @@ func TestPolicyHold_ReleasedAtThresholdRestoredOnSuccess(t *testing.T) {
 	}
 	if got := holdsOf(t, s); len(got) != 0 {
 		t.Fatalf("holds после возврата = %+v", got)
+	}
+}
+
+// Линк опущен (Suspend на падении WAN) — проверок нет: порог не набирается,
+// permit не снимается, во флеш ничего не пишется. Политику с такого
+// интерфейса NDMS уводит сам (F750).
+func TestPolicyHold_SuspendedLinkNotChecked(t *testing.T) {
+	orig := httpprobe.Client
+	t.Cleanup(func() { httpprobe.Client = orig })
+	s, m, config, _ := newKernelSensorService(t)
+	fp := &fakePolicies{lists: map[string][]string{"HydraRoute": {"OpkgTun7", "PPPoE0"}}}
+	s.SetPolicies(fp)
+	httpprobe.Client = alwaysFailDoer{}
+
+	stubIfaceUp(t, false)
+	for range 5 {
+		s.sensorTick(m, config)
+	}
+	if fp.denies != 0 || m.failCount != 0 || repairs(s) != 0 {
+		t.Fatalf("опущенный линк проверялся: denies=%d failCount=%d repairs=%d", fp.denies, m.failCount, repairs(s))
+	}
+	if len(s.logBuffer.GetAll()) != 0 {
+		t.Fatal("в журнал попали проверки опущенного линка")
+	}
+
+	// Линк поднят (Resume) — мониторинг работает как прежде.
+	stubIfaceUp(t, true)
+	for range 3 {
+		s.sensorTick(m, config)
+	}
+	if fp.denies != 1 {
+		t.Fatalf("после подъёма линка порог не сработал: denies=%d", fp.denies)
+	}
+}
+
+// downDuringProbeDoer опускает линк, пока проба летит, и проваливает её.
+type downDuringProbeDoer struct{ up *bool }
+
+func (d downDuringProbeDoer) Do(context.Context, httpclient.CallConfig) (*httpclient.Result, error) {
+	*d.up = false
+	return nil, errors.New("network is down")
+}
+
+// Линк опустили посреди пробы (Suspend во время проверки): её провал — след
+// опускания, порог не набирается и permit не снимается (ревью F750).
+func TestPolicyHold_LinkDownDuringProbeNotCounted(t *testing.T) {
+	orig := httpprobe.Client
+	t.Cleanup(func() { httpprobe.Client = orig })
+	s, m, config, _ := newKernelSensorService(t)
+	fp := &fakePolicies{lists: map[string][]string{"HydraRoute": {"OpkgTun7", "PPPoE0"}}}
+	s.SetPolicies(fp)
+
+	up := true
+	old := ifaceUp
+	ifaceUp = func(string) bool { return up }
+	t.Cleanup(func() { ifaceUp = old })
+	httpprobe.Client = downDuringProbeDoer{up: &up}
+
+	for range 3 {
+		up = true // линк поднят к началу тика, опускается внутри пробы
+		s.sensorTick(m, config)
+	}
+	if fp.denies != 0 || m.failCount != 0 || len(s.logBuffer.GetAll()) != 0 {
+		t.Fatalf("провал пробы на опущенном линке засчитан: denies=%d failCount=%d журнал=%d",
+			fp.denies, m.failCount, len(s.logBuffer.GetAll()))
 	}
 }
 
