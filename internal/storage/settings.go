@@ -263,7 +263,7 @@ func (s *SettingsStore) Load() (*Settings, error) {
 	}
 
 	if needsSave {
-		if err := s.saveUnlocked(&settings); err != nil {
+		if err := s.saveUnlockedWithBackup(&settings, !restoredFromBackup); err != nil {
 			return nil, err
 		}
 	}
@@ -1018,6 +1018,12 @@ func (s *SettingsStore) Update(mut func(*Settings) error) error {
 // saveUnlocked writes settings to disk without acquiring lock.
 // Caller must hold the lock.
 func (s *SettingsStore) saveUnlocked(settings *Settings) error {
+	return s.saveUnlockedWithBackup(settings, true)
+}
+
+// Recovery must never rotate the corrupt main file over the good backup,
+// including when quarantine failed and the main file is still present.
+func (s *SettingsStore) saveUnlockedWithBackup(settings *Settings, rotateBackup bool) error {
 	settings.SchemaVersion = CurrentSchemaVersion
 
 	var buf bytes.Buffer
@@ -1048,7 +1054,7 @@ func (s *SettingsStore) saveUnlocked(settings *Settings) error {
 	// inode survives the rename below). Load() falls back to it if the main
 	// file is ever found corrupt after a power loss.
 	bakPath := s.path + ".bak"
-	if _, err := os.Stat(s.path); err == nil {
+	if _, err := os.Stat(s.path); rotateBackup && err == nil {
 		_ = os.Remove(bakPath)
 		_ = os.Link(s.path, bakPath)
 	}
