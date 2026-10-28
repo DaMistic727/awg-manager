@@ -354,13 +354,14 @@
 	.search-row { display: flex; gap: 0.35rem; flex: 1; min-width: 220px; }
 	.search-row input, .section-head input { flex: 1; min-width: 180px; padding: 0.4rem 0.5rem; }
 	.pkg { width: 100%; border-collapse: collapse; font-size: 0.88rem; table-layout: fixed; }
-	.pkg th, .pkg td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border-subtle, #333); vertical-align: top; }
+	.pkg th, .pkg td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--color-border); vertical-align: top; }
 	.pkg th:nth-child(1) { width: 16%; }
 	.pkg th:nth-child(2) { width: 12%; }
 	.pkg th:nth-child(3) { width: 52%; }
 	.pkg th:nth-child(4) { width: 20%; }
 	.desc { font-size: 0.82rem; opacity: 0.85; word-break: break-word; }
-	.act { text-align: right; white-space: nowrap; }
+	.pkg code { overflow-wrap: anywhere; }
+	.pkg td.act { text-align: right; white-space: nowrap; }
 	.packages-table-wrap { max-height: 420px; overflow: auto; }
 	.pager { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; margin-top: 0.5rem; font-size: 0.85rem; }
 	.output { margin: 0; white-space: pre-wrap; font-size: 0.8rem; max-height: 200px; overflow: auto; }

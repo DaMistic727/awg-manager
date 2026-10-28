@@ -120,10 +120,10 @@
 	.search {
 		padding: 6px 10px;
 		font-size: 13px;
-		background: var(--surface-1, #1f2425);
-		border: 1px solid var(--border-1, #2c3134);
+		background: var(--color-bg-primary);
+		border: 1px solid var(--color-border);
 		border-radius: 6px;
-		color: var(--text-primary, #e8e6e3);
+		color: var(--text-primary);
 	}
 	.filters-grid {
 		display: grid;
